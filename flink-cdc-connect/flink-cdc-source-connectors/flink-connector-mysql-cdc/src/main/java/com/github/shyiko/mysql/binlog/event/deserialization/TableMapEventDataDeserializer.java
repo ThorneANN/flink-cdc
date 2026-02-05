@@ -20,8 +20,14 @@ package com.github.shyiko.mysql.binlog.event.deserialization;
 import com.github.shyiko.mysql.binlog.event.TableMapEventData;
 import com.github.shyiko.mysql.binlog.event.TableMapEventMetadata;
 import com.github.shyiko.mysql.binlog.io.ByteArrayInputStream;
+import com.mysql.cj.log.Log;
+import io.debezium.relational.TableId;
+import org.apache.flink.cdc.connectors.mysql.debezium.dispatcher.EventDispatcherImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.function.Predicate;
 
 import static com.github.shyiko.mysql.binlog.event.deserialization.ColumnType.TYPED_ARRAY;
 import static com.github.shyiko.mysql.binlog.event.deserialization.ColumnType.TYPED_ARRAY_OLD;
@@ -38,11 +44,31 @@ import static com.github.shyiko.mysql.binlog.event.deserialization.ColumnType.TY
  * <p>Remove this file once <a
  * href="https://github.com/osheroff/mysql-binlog-connector-java/issues/104">mysql-binlog-connector-java#104</a>
  * fixed.
+ *
+ * <p>Optimized to skip detailed field metadata deserialization for non-collected tables
+ * when a table filter is provided. This reduces CPU and memory usage during binlog processing.
  */
 public class TableMapEventDataDeserializer implements EventDataDeserializer<TableMapEventData> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(TableMapEventDataDeserializer.class);
     private final TableMapEventMetadataDeserializer metadataDeserializer =
             new TableMapEventMetadataDeserializer();
+    private final Predicate<TableId> tableFilter;
+
+    /** Default constructor for backward compatibility - deserializes all tables fully. */
+    public TableMapEventDataDeserializer() {
+        this.tableFilter = null;
+    }
+
+    /**
+     * Constructor with table filter for optimized deserialization.
+     *
+     * @param tableFilter Predicate to test if a table should be fully deserialized.
+     *                    If null, all tables are fully deserialized (same as default constructor).
+     */
+    public TableMapEventDataDeserializer(Predicate<TableId> tableFilter) {
+        this.tableFilter = tableFilter;
+    }
 
     @Override
     public TableMapEventData deserialize(ByteArrayInputStream inputStream) throws IOException {
@@ -52,24 +78,53 @@ public class TableMapEventDataDeserializer implements EventDataDeserializer<Tabl
         eventData.setDatabase(inputStream.readZeroTerminatedString());
         inputStream.skip(1); // table name
         eventData.setTable(inputStream.readZeroTerminatedString());
+
+        // Check if this table should be fully deserialized
+        TableId tableId = new TableId(eventData.getDatabase(), null, eventData.getTable());
+        boolean shouldDeserializeMetadata = tableFilter == null || tableFilter.test(tableId);
+
         int numberOfColumns = inputStream.readPackedInteger();
         eventData.setColumnTypes(inputStream.read(numberOfColumns));
-        int columnMetadataLength = inputStream.readPackedInteger(); // column metadata length
-        eventData.setColumnMetadata(
-                readMetadata(
-                        new ByteArrayInputStream(inputStream.read(columnMetadataLength)),
-                        eventData.getColumnTypes()));
-        eventData.setColumnNullability(inputStream.readBitSet(numberOfColumns, true));
-        int metadataLength = inputStream.available();
-        TableMapEventMetadata metadata = null;
-        if (metadataLength > 0) {
-            metadata =
-                    metadataDeserializer.deserialize(
-                            new ByteArrayInputStream(inputStream.read(metadataLength)),
-                            eventData.getColumnTypes().length,
-                            numericColumnCount(eventData.getColumnTypes()));
+
+        if (shouldDeserializeMetadata) {
+            // Full deserialization for collected tables
+            int columnMetadataLength = inputStream.readPackedInteger(); // column metadata length
+            eventData.setColumnMetadata(
+                    readMetadata(
+                            new ByteArrayInputStream(inputStream.read(columnMetadataLength)),
+                            eventData.getColumnTypes()));
+            eventData.setColumnNullability(inputStream.readBitSet(numberOfColumns, true));
+            int metadataLength = inputStream.available();
+            TableMapEventMetadata metadata = null;
+            if (metadataLength > 0) {
+                metadata =
+                        metadataDeserializer.deserialize(
+                                new ByteArrayInputStream(inputStream.read(metadataLength)),
+                                eventData.getColumnTypes().length,
+                                numericColumnCount(eventData.getColumnTypes()));
+            }
+            eventData.setEventMetadata(metadata);
+            LOG.info("Only serverize for tables %s and %s " ,eventData.getDatabase(),eventData.getTable());
+
+        } else {
+            // Skip detailed metadata deserialization for non-collected tables
+            int columnMetadataLength = inputStream.readPackedInteger();
+            inputStream.skip(columnMetadataLength);
+
+            // Skip column nullability bitmap
+            int nullabilityBitmapSize = (numberOfColumns + 7) / 8;
+            inputStream.skip(nullabilityBitmapSize);
+
+            // Skip remaining metadata if any
+            int remainingBytes = inputStream.available();
+            if (remainingBytes > 0) {
+                inputStream.skip(remainingBytes);
+            }
+
+            // Set minimal metadata to avoid NPE
+            eventData.setColumnMetadata(new int[numberOfColumns]);
         }
-        eventData.setEventMetadata(metadata);
+
         return eventData;
     }
 

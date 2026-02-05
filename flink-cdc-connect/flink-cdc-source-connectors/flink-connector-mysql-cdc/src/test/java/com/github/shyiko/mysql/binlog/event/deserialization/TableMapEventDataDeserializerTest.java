@@ -20,6 +20,7 @@ package com.github.shyiko.mysql.binlog.event.deserialization;
 import com.github.shyiko.mysql.binlog.event.TableMapEventData;
 import com.github.shyiko.mysql.binlog.event.TableMapEventMetadata;
 import com.github.shyiko.mysql.binlog.io.ByteArrayInputStream;
+import io.debezium.relational.TableId;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -204,5 +205,95 @@ class TableMapEventDataDeserializerTest {
                 Arrays.asList(
                         33, 33, 63, 33, 63, 63, 63, 63, 255, 255, 255, 255, 255, 255, 255, 255));
         return metadata;
+    }
+
+    @Test
+    void testDeserializeWithFilter_CollectedTable() throws IOException {
+        // Test that collected tables are fully deserialized
+        TableMapEventDataDeserializer deserializer =
+                new TableMapEventDataDeserializer(
+                        tableId ->
+                                tableId.catalog() == null
+                                        && "testDb".equals(tableId.table())
+                                        && "testTable".equals(tableId.identifier()));
+
+        byte[] data = getTestData();
+        TableMapEventData eventData = deserializer.deserialize(new ByteArrayInputStream(data));
+
+        // Should have full metadata
+        assertThat(eventData.getTableId()).isEqualTo(1);
+        assertThat(eventData.getDatabase()).isEqualTo("testDb");
+        assertThat(eventData.getTable()).isEqualTo("testTable");
+        assertThat(eventData.getColumnTypes()).isEqualTo(new byte[] {8, 1, 20});
+        assertThat(eventData.getColumnMetadata()).isNotNull();
+        assertThat(eventData.getColumnNullability()).isNotNull();
+        assertThat(eventData.getEventMetadata()).isNotNull();
+    }
+
+    @Test
+    void testDeserializeWithFilter_NonCollectedTable() throws IOException {
+        // Test that non-collected tables skip metadata deserialization
+        TableMapEventDataDeserializer deserializer =
+                new TableMapEventDataDeserializer(
+                        tableId -> false); // Filter out all tables
+
+        byte[] data = getTestData();
+        TableMapEventData eventData = deserializer.deserialize(new ByteArrayInputStream(data));
+
+        // Should have basic info only
+        assertThat(eventData.getTableId()).isEqualTo(1);
+        assertThat(eventData.getDatabase()).isEqualTo("testDb");
+        assertThat(eventData.getTable()).isEqualTo("testTable");
+        assertThat(eventData.getColumnTypes()).isEqualTo(new byte[] {8, 1, 20});
+
+        // Metadata should be minimal
+        assertThat(eventData.getColumnMetadata())
+                .isEqualTo(new int[] {0, 0, 0}); // Empty metadata array
+        assertThat(eventData.getColumnNullability()).isNull();
+        assertThat(eventData.getEventMetadata()).isNull();
+    }
+
+    @Test
+    void testDeserializeWithNullFilter() throws IOException {
+        // Test that null filter behaves like default constructor
+        TableMapEventDataDeserializer deserializer = new TableMapEventDataDeserializer(null);
+
+        byte[] data = getTestData();
+        TableMapEventData eventData = deserializer.deserialize(new ByteArrayInputStream(data));
+
+        // Should have full metadata (same as default constructor)
+        assertThat(eventData).hasToString(getExpectedEventData().toString());
+    }
+
+    private byte[] getTestData() {
+        return new byte[] {
+            // table_id : 6 bytes
+            1, 0, 0, 0, 0, 0,
+            // flags : 2 bytes
+            1, 0,
+            // database_name string length : 1 byte
+            6,
+            // database_name null-terminated string, end with 0
+            116, 101, 115, 116, 68, 98, 0,
+            // table_name string length : 1 byte
+            9,
+            // table_name null-terminated string, end with 0
+            116, 101, 115, 116, 84, 97, 98, 108, 101, 0,
+            // column_count
+            3,
+            // column_type list
+            8, 1, 20,
+            // metadata_length
+            1,
+            // metadata
+            8,
+            // null_bits
+            80,
+            // optional metadata fields
+            // SIGNEDNESS
+            1, 1, 0,
+            // DEFAULT_CHARSET
+            2, 1, 45
+        };
     }
 }

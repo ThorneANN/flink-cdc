@@ -311,6 +311,12 @@ public class MySqlStreamingChangeEventSource
         // Add our custom deserializers ...
         eventDeserializer.setEventDataDeserializer(EventType.STOP, new StopEventDataDeserializer());
         eventDeserializer.setEventDataDeserializer(EventType.GTID, new GtidEventDataDeserializer());
+        // Use table filter to skip field metadata deserialization for non-collected tables
+        eventDeserializer.setEventDataDeserializer(
+                EventType.TABLE_MAP,
+                new com.github.shyiko.mysql.binlog.event.deserialization
+                                .TableMapEventDataDeserializer(
+                        connectorConfig.getTableFilters().dataCollectionFilter()::isIncluded));
         eventDeserializer.setEventDataDeserializer(
                 EventType.WRITE_ROWS,
                 new RowDeserializers.WriteRowsDeserializer(tableMapEventByTableId));
