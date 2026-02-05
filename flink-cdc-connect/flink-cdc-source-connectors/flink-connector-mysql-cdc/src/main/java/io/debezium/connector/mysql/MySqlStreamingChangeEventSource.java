@@ -315,7 +315,7 @@ public class MySqlStreamingChangeEventSource
         eventDeserializer.setEventDataDeserializer(
                 EventType.TABLE_MAP,
                 new com.github.shyiko.mysql.binlog.event.deserialization
-                                .TableMapEventDataDeserializer(
+                        .TableMapEventDataDeserializer(
                         connectorConfig.getTableFilters().dataCollectionFilter()::isIncluded));
         eventDeserializer.setEventDataDeserializer(
                 EventType.WRITE_ROWS,

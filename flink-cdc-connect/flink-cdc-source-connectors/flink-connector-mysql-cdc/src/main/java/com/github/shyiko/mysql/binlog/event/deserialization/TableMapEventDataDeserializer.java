@@ -20,9 +20,7 @@ package com.github.shyiko.mysql.binlog.event.deserialization;
 import com.github.shyiko.mysql.binlog.event.TableMapEventData;
 import com.github.shyiko.mysql.binlog.event.TableMapEventMetadata;
 import com.github.shyiko.mysql.binlog.io.ByteArrayInputStream;
-import com.mysql.cj.log.Log;
 import io.debezium.relational.TableId;
-import org.apache.flink.cdc.connectors.mysql.debezium.dispatcher.EventDispatcherImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,8 +43,8 @@ import static com.github.shyiko.mysql.binlog.event.deserialization.ColumnType.TY
  * href="https://github.com/osheroff/mysql-binlog-connector-java/issues/104">mysql-binlog-connector-java#104</a>
  * fixed.
  *
- * <p>Optimized to skip detailed field metadata deserialization for non-collected tables
- * when a table filter is provided. This reduces CPU and memory usage during binlog processing.
+ * <p>Optimized to skip detailed field metadata deserialization for non-collected tables when a
+ * table filter is provided. This reduces CPU and memory usage during binlog processing.
  */
 public class TableMapEventDataDeserializer implements EventDataDeserializer<TableMapEventData> {
 
@@ -63,8 +61,8 @@ public class TableMapEventDataDeserializer implements EventDataDeserializer<Tabl
     /**
      * Constructor with table filter for optimized deserialization.
      *
-     * @param tableFilter Predicate to test if a table should be fully deserialized.
-     *                    If null, all tables are fully deserialized (same as default constructor).
+     * @param tableFilter Predicate to test if a table should be fully deserialized. If null, all
+     *     tables are fully deserialized (same as default constructor).
      */
     public TableMapEventDataDeserializer(Predicate<TableId> tableFilter) {
         this.tableFilter = tableFilter;
@@ -104,7 +102,10 @@ public class TableMapEventDataDeserializer implements EventDataDeserializer<Tabl
                                 numericColumnCount(eventData.getColumnTypes()));
             }
             eventData.setEventMetadata(metadata);
-            LOG.info("Only serverize for tables %s and %s " ,eventData.getDatabase(),eventData.getTable());
+            //            LOG.info(
+            //                    "Only serverise for tables {} and {} ",
+            //                    eventData.getDatabase(),
+            //                    eventData.getTable());
 
         } else {
             // Skip detailed metadata deserialization for non-collected tables
