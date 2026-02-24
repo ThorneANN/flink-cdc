@@ -92,12 +92,13 @@ public class FlussMetaDataApplier implements MetadataApplier {
     @Override
     public void applySchemaChange(SchemaChangeEvent schemaChangeEvent) {
         LOG.info("fluss metadata applier receive schemaChangeEvent {}", schemaChangeEvent);
+        Admin admin = getAdmin();
         if (schemaChangeEvent instanceof CreateTableEvent) {
             CreateTableEvent createTableEvent = (CreateTableEvent) schemaChangeEvent;
-            applyCreateTable(createTableEvent);
+            applyCreateTable(admin, createTableEvent);
         } else if (schemaChangeEvent instanceof DropTableEvent) {
             DropTableEvent dropTableEvent = (DropTableEvent) schemaChangeEvent;
-            applyDropTable(dropTableEvent);
+            applyDropTable(admin, dropTableEvent);
         } else {
             throw new IllegalArgumentException(
                     "fluss metadata applier only support CreateTableEvent now but receives "
@@ -105,9 +106,8 @@ public class FlussMetaDataApplier implements MetadataApplier {
         }
     }
 
-    private void applyCreateTable(CreateTableEvent event) {
+    private void applyCreateTable(Admin admin, CreateTableEvent event) {
         try {
-            Admin admin = getAdmin();
             TableId tableId = event.tableId();
             TablePath tablePath = new TablePath(tableId.getSchemaName(), tableId.getTableName());
             String tableIdentifier = tablePath.getDatabaseName() + "." + tablePath.getTableName();
@@ -129,9 +129,8 @@ public class FlussMetaDataApplier implements MetadataApplier {
         }
     }
 
-    private void applyDropTable(DropTableEvent event) {
+    private void applyDropTable(Admin admin, DropTableEvent event) {
         try {
-            Admin admin = getAdmin();
             TableId tableId = event.tableId();
             TablePath tablePath = new TablePath(tableId.getSchemaName(), tableId.getTableName());
             admin.dropTable(tablePath, true).get();
