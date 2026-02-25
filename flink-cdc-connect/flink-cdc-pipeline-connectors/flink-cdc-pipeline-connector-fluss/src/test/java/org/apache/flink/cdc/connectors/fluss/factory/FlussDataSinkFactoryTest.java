@@ -141,7 +141,7 @@ public class FlussDataSinkFactoryTest {
                                                 new Configuration(),
                                                 Thread.currentThread().getContextClassLoader())))
                 .hasMessageContaining(
-                        "Invalid bucket number configuration for table : database1.table1: 11a");
+                        "Invalid bucket number configuration for : database1.table1: 11a");
     }
 
     private Configuration createValidConfiguration() {
