@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.flink.cdc.connectors.fluss.sink;
+package org.apache.flink.cdc.connectors.fluss.utils;
 
 import javax.annotation.Nullable;
 
@@ -24,7 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Utils for parsing fluss yaml sink options. */
+/** Utils for parsing fluss Yaml sink options. */
 public class FlussConfigUtils {
     public static Map<String, List<String>> parseBucketKeys(@Nullable String rawValue)
             throws IllegalArgumentException {
@@ -78,4 +78,6 @@ public class FlussConfigUtils {
         }
         return result;
     }
+
+    private FlussConfigUtils() {}
 }
