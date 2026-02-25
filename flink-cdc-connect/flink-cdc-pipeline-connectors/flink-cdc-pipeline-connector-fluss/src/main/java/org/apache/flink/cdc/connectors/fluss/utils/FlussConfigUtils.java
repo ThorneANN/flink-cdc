@@ -64,16 +64,13 @@ public class FlussConfigUtils {
             String[] kv = tableBucketNumStr.trim().split(":", 2);
             if (kv.length != 2) {
                 throw new IllegalArgumentException(
-                        "Invalid bucket number configuration: " + rawValue);
+                        "Invalid bucket number configuration for table : " + rawValue);
             }
-
-            String table = kv[0].trim();
             try {
-                int value = Integer.parseInt(kv[1].trim());
-                result.put(table, value);
+                result.put(kv[0].trim(), Integer.valueOf(kv[1].trim()));
             } catch (NumberFormatException ignored) {
                 throw new IllegalArgumentException(
-                        "Invalid bucket number configuration: " + rawValue);
+                        "Invalid bucket number configuration for table : " + rawValue);
             }
         }
         return result;
