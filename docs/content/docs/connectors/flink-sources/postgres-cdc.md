@@ -517,7 +517,7 @@ The config option `scan.startup.mode` specifies the startup mode for PostgreSQL 
 
 Scan Newly Added Tables feature enables you to add new tables to monitor for existing running pipeline. The newly added tables will read their snapshot data firstly and then read their WAL (Write-Ahead Log) or replication slot changes automatically.
 
-Imagine this scenario: At the beginning, a Flink job monitors tables `[product, user, address]`, but after some days we would like the job can also monitor tables `[order, custom]` which contain history data, and we need the job can still reuse existing state of the job. This feature can resolve this case gracefully.
+Imagine this scenario: At the beginning, a Flink job monitors tables `[product, user, address]`, but after some days we would like the job to also monitor tables `[order, custom]` which contain historical data, and we need the job to still reuse existing state of the job. This feature can resolve this case gracefully.
 
 The following operations show how to enable this feature to resolve above scenario. An existing Flink job which uses PostgreSQL CDC Source like:
 

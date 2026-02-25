@@ -512,11 +512,11 @@ Applications can use change streams to subscribe to all data changes on a single
 By the way, Debezium's MongoDB change streams exploration mentioned by [DBZ-435](https://issues.redhat.com/browse/DBZ-435) is on roadmap.<br> 
 If it's done, we can consider integrating two kinds of source connector for users to choose.
 
-### Scan Newly Added Tables
+### Scan Newly Added Collections
 
 **Note:** This feature is available since Flink CDC 3.1.0.
 
-The Scan Newly Added Tables feature enables you to add new collections to monitor for existing running pipeline. The newly added collections will read their snapshot data firstly and then read their change stream automatically.
+The Scan Newly Added Collections feature enables you to add new collections to monitor for existing running pipeline. The newly added collections will read their snapshot data firstly and then read their change stream automatically.
 
 Imagine this scenario: At the beginning, a Flink job monitors collections `[product, user, address]`, but after some days we would like the job can also monitor collections `[order, custom]` which contain history data, and we need the job can still reuse existing state of the job. This feature can resolve this case gracefully.
 
@@ -529,7 +529,7 @@ The following operations show how to enable this feature to resolve above scenar
         .collectionList("db.product", "db.user", "db.address") // set captured collections
         .username("yourUsername")
         .password("yourPassword")
-        .scanNewlyAddedTableEnabled(true) // enable scan the newly added tables feature
+        .scanNewlyAddedTableEnabled(true) // enable scan the newly added collections feature
         .deserializer(new JsonDebeziumDeserializationSchema()) // converts SourceRecord to JSON String
         .build();
    // your business code
