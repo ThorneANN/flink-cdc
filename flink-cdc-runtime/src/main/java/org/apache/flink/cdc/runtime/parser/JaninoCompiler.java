@@ -90,7 +90,14 @@ public class JaninoCompiler {
     public static final String DEFAULT_TIME_ZONE = "__time_zone__";
 
     private static final String[] BUILTIN_FUNCTION_MODULES = {
-        "Arithmetic", "Casting", "Comparison", "Logical", "String", "Struct", "Temporal"
+        "Arithmetic",
+        "Casting",
+        "Comparison",
+        "Encryption",
+        "Logical",
+        "String",
+        "Struct",
+        "Temporal"
     };
 
     @VisibleForTesting

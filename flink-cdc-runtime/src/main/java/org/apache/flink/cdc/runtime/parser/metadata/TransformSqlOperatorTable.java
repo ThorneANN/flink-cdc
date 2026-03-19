@@ -461,4 +461,84 @@ public class TransformSqlOperatorTable extends ReflectiveSqlOperatorTable {
                             OperandTypes.family(SqlTypeFamily.STRING),
                             OperandTypes.family(SqlTypeFamily.STRING, SqlTypeFamily.BOOLEAN)),
                     SqlFunctionCategory.USER_DEFINED_FUNCTION);
+
+    // ----------------------
+    // Encryption Functions
+    // ----------------------
+    public static final SqlFunction MD5 =
+            new SqlFunction(
+                    "MD5",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction SHA256 =
+            new SqlFunction(
+                    "SHA256",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction SHA512 =
+            new SqlFunction(
+                    "SHA512",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction AES_ENCRYPT =
+            new SqlFunction(
+                    "AES_ENCRYPT",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING, SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction AES_DECRYPT =
+            new SqlFunction(
+                    "AES_DECRYPT",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING, SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction TO_BASE64 =
+            new SqlFunction(
+                    "TO_BASE64",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
+
+    public static final SqlFunction FROM_BASE64 =
+            new SqlFunction(
+                    "FROM_BASE64",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.cascade(
+                            ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                            SqlTypeTransforms.TO_NULLABLE),
+                    null,
+                    OperandTypes.family(SqlTypeFamily.STRING),
+                    SqlFunctionCategory.STRING);
 }
