@@ -114,7 +114,8 @@ public class TransformTranslator {
                     transform.getTableOptions(),
                     transform.getTableOptionsDelimiter(),
                     transform.getPostTransformConverter(),
-                    supportedMetadataColumns);
+                    supportedMetadataColumns,
+                    transform.getCastAllColumnsTo());
         }
         postTransformFunctionBuilder.addTimezone(timezone);
         postTransformFunctionBuilder.addUdfFunctions(

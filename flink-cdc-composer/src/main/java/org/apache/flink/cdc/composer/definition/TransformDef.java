@@ -39,6 +39,9 @@ import java.util.Objects;
  *   <li>tableOptionsDelimiter: a string for delimiter of table options, default is `,`. Optional
  *       for the definition.
  *   <li>description: description for the transformation. Optional for the definition.
+ *   <li>castAllColumnsTo: a type-name string (e.g. {@code "STRING"}, {@code "VARCHAR(1024)"}) that
+ *       causes every column in the matched table to be cast to the specified type. Both the output
+ *       schema and the data values are converted. Optional for the definition.
  * </ul>
  */
 public class TransformDef {
@@ -51,6 +54,30 @@ public class TransformDef {
     private final String tableOptions;
     private final String tableOptionsDelimiter;
     private final String postTransformConverter;
+    private final String castAllColumnsTo;
+
+    public TransformDef(
+            String sourceTable,
+            String projection,
+            String filter,
+            String primaryKeys,
+            String partitionKeys,
+            String tableOptions,
+            String tableOptionsDelimiter,
+            String description,
+            String postTransformConverter,
+            String castAllColumnsTo) {
+        this.sourceTable = sourceTable;
+        this.projection = projection;
+        this.filter = filter;
+        this.primaryKeys = primaryKeys;
+        this.partitionKeys = partitionKeys;
+        this.tableOptions = tableOptions;
+        this.tableOptionsDelimiter = tableOptionsDelimiter;
+        this.description = description;
+        this.postTransformConverter = postTransformConverter;
+        this.castAllColumnsTo = castAllColumnsTo;
+    }
 
     public TransformDef(
             String sourceTable,
@@ -62,15 +89,17 @@ public class TransformDef {
             String tableOptionsDelimiter,
             String description,
             String postTransformConverter) {
-        this.sourceTable = sourceTable;
-        this.projection = projection;
-        this.filter = filter;
-        this.primaryKeys = primaryKeys;
-        this.partitionKeys = partitionKeys;
-        this.tableOptions = tableOptions;
-        this.tableOptionsDelimiter = tableOptionsDelimiter;
-        this.description = description;
-        this.postTransformConverter = postTransformConverter;
+        this(
+                sourceTable,
+                projection,
+                filter,
+                primaryKeys,
+                partitionKeys,
+                tableOptions,
+                tableOptionsDelimiter,
+                description,
+                postTransformConverter,
+                null);
     }
 
     public TransformDef(
@@ -91,7 +120,8 @@ public class TransformDef {
                 tableOptions,
                 ",",
                 description,
-                postTransformConverter);
+                postTransformConverter,
+                null);
     }
 
     public String getSourceTable() {
@@ -130,6 +160,10 @@ public class TransformDef {
         return postTransformConverter;
     }
 
+    public String getCastAllColumnsTo() {
+        return castAllColumnsTo;
+    }
+
     @Override
     public String toString() {
         return "TransformDef{"
@@ -147,6 +181,9 @@ public class TransformDef {
                 + '\''
                 + ", postTransformConverter='"
                 + postTransformConverter
+                + '\''
+                + ", castAllColumnsTo='"
+                + castAllColumnsTo
                 + '\''
                 + '}';
     }
@@ -168,7 +205,8 @@ public class TransformDef {
                 && Objects.equals(partitionKeys, that.partitionKeys)
                 && Objects.equals(tableOptions, that.tableOptions)
                 && Objects.equals(tableOptionsDelimiter, that.tableOptionsDelimiter)
-                && Objects.equals(postTransformConverter, that.postTransformConverter);
+                && Objects.equals(postTransformConverter, that.postTransformConverter)
+                && Objects.equals(castAllColumnsTo, that.castAllColumnsTo);
     }
 
     @Override
@@ -182,6 +220,7 @@ public class TransformDef {
                 partitionKeys,
                 tableOptions,
                 tableOptionsDelimiter,
-                postTransformConverter);
+                postTransformConverter,
+                castAllColumnsTo);
     }
 }

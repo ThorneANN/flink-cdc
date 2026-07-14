@@ -19,6 +19,7 @@ package org.apache.flink.cdc.runtime.operators.transform;
 
 import org.apache.flink.cdc.common.schema.Selectors;
 import org.apache.flink.cdc.common.source.SupportedMetadataColumn;
+import org.apache.flink.cdc.common.types.DataType;
 import org.apache.flink.cdc.runtime.operators.transform.converter.PostTransformConverter;
 
 import javax.annotation.Nullable;
@@ -33,6 +34,22 @@ public class PostTransformer {
     private final @Nullable TransformFilter filter;
     private final @Nullable PostTransformConverter postTransformConverter;
     private final SupportedMetadataColumn[] supportedMetadataColumns;
+    private final @Nullable DataType castAllColumnsToType;
+
+    public PostTransformer(
+            Selectors selectors,
+            @Nullable TransformProjection projection,
+            @Nullable TransformFilter filter,
+            @Nullable PostTransformConverter postTransformConverter,
+            SupportedMetadataColumn[] supportedMetadataColumns,
+            @Nullable DataType castAllColumnsToType) {
+        this.selectors = selectors;
+        this.projection = projection;
+        this.filter = filter;
+        this.postTransformConverter = postTransformConverter;
+        this.supportedMetadataColumns = supportedMetadataColumns;
+        this.castAllColumnsToType = castAllColumnsToType;
+    }
 
     public PostTransformer(
             Selectors selectors,
@@ -40,11 +57,7 @@ public class PostTransformer {
             @Nullable TransformFilter filter,
             @Nullable PostTransformConverter postTransformConverter,
             SupportedMetadataColumn[] supportedMetadataColumns) {
-        this.selectors = selectors;
-        this.projection = projection;
-        this.filter = filter;
-        this.postTransformConverter = postTransformConverter;
-        this.supportedMetadataColumns = supportedMetadataColumns;
+        this(selectors, projection, filter, postTransformConverter, supportedMetadataColumns, null);
     }
 
     public Selectors getSelectors() {
@@ -65,5 +78,9 @@ public class PostTransformer {
 
     public SupportedMetadataColumn[] getSupportedMetadataColumns() {
         return supportedMetadataColumns;
+    }
+
+    public Optional<DataType> getCastAllColumnsToType() {
+        return Optional.ofNullable(castAllColumnsToType);
     }
 }

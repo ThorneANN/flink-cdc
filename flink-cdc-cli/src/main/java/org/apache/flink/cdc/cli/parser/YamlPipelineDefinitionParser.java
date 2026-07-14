@@ -88,6 +88,7 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
     private static final String TRANSFORM_DESCRIPTION_KEY = "description";
     private static final String TRANSFORM_CONVERTER_AFTER_TRANSFORM_KEY =
             "converter-after-transform";
+    private static final String TRANSFORM_CAST_ALL_COLUMNS_TO_KEY = "cast-all-columns-to";
 
     // UDF related keys
     private static final String UDF_KEY = "user-defined-function";
@@ -351,7 +352,8 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
                         TRANSFORM_TABLE_OPTION_KEY,
                         TRANSFORM_TABLE_OPTION_DELIMITER_KEY,
                         TRANSFORM_DESCRIPTION_KEY,
-                        TRANSFORM_CONVERTER_AFTER_TRANSFORM_KEY));
+                        TRANSFORM_CONVERTER_AFTER_TRANSFORM_KEY,
+                        TRANSFORM_CAST_ALL_COLUMNS_TO_KEY));
 
         String sourceTable =
                 checkNotNull(
@@ -395,6 +397,10 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
                 Optional.ofNullable(transformNode.get(TRANSFORM_CONVERTER_AFTER_TRANSFORM_KEY))
                         .map(JsonNode::asText)
                         .orElse(null);
+        String castAllColumnsTo =
+                Optional.ofNullable(transformNode.get(TRANSFORM_CAST_ALL_COLUMNS_TO_KEY))
+                        .map(JsonNode::asText)
+                        .orElse(null);
 
         return new TransformDef(
                 sourceTable,
@@ -405,7 +411,8 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
                 tableOptions,
                 tableOptionsDelimiter,
                 description,
-                postTransformConverter);
+                postTransformConverter,
+                castAllColumnsTo);
     }
 
     private Configuration toPipelineConfig(JsonNode pipelineConfigNode) {

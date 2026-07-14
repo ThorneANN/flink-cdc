@@ -37,6 +37,30 @@ public class TransformRule implements Serializable {
     private final String tableOptionsDelimiter;
     private final @Nullable String postTransformConverter;
     private final SupportedMetadataColumn[] supportedMetadataColumns;
+    private final @Nullable String castAllColumnsTo;
+
+    public TransformRule(
+            String tableInclusions,
+            @Nullable String projection,
+            @Nullable String filter,
+            String primaryKey,
+            String partitionKey,
+            String tableOption,
+            String tableOptionsDelimiter,
+            @Nullable String postTransformConverter,
+            SupportedMetadataColumn[] supportedMetadataColumns,
+            @Nullable String castAllColumnsTo) {
+        this.tableInclusions = tableInclusions;
+        this.projection = StringUtils.isNullOrWhitespaceOnly(projection) ? "*" : projection;
+        this.filter = filter;
+        this.primaryKey = primaryKey;
+        this.partitionKey = partitionKey;
+        this.tableOption = tableOption;
+        this.tableOptionsDelimiter = tableOptionsDelimiter;
+        this.postTransformConverter = postTransformConverter;
+        this.supportedMetadataColumns = supportedMetadataColumns;
+        this.castAllColumnsTo = castAllColumnsTo;
+    }
 
     public TransformRule(
             String tableInclusions,
@@ -48,15 +72,17 @@ public class TransformRule implements Serializable {
             String tableOptionsDelimiter,
             @Nullable String postTransformConverter,
             SupportedMetadataColumn[] supportedMetadataColumns) {
-        this.tableInclusions = tableInclusions;
-        this.projection = StringUtils.isNullOrWhitespaceOnly(projection) ? "*" : projection;
-        this.filter = filter;
-        this.primaryKey = primaryKey;
-        this.partitionKey = partitionKey;
-        this.tableOption = tableOption;
-        this.tableOptionsDelimiter = tableOptionsDelimiter;
-        this.postTransformConverter = postTransformConverter;
-        this.supportedMetadataColumns = supportedMetadataColumns;
+        this(
+                tableInclusions,
+                projection,
+                filter,
+                primaryKey,
+                partitionKey,
+                tableOption,
+                tableOptionsDelimiter,
+                postTransformConverter,
+                supportedMetadataColumns,
+                null);
     }
 
     public String getTableInclusions() {
@@ -96,5 +122,10 @@ public class TransformRule implements Serializable {
 
     public SupportedMetadataColumn[] getSupportedMetadataColumns() {
         return supportedMetadataColumns;
+    }
+
+    @Nullable
+    public String getCastAllColumnsTo() {
+        return castAllColumnsTo;
     }
 }

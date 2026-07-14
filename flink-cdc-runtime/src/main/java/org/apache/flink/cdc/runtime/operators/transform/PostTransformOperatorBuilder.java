@@ -53,7 +53,8 @@ public class PostTransformOperatorBuilder {
                 tableOptions,
                 ",",
                 postTransformConverter,
-                supportedMetadataColumns);
+                supportedMetadataColumns,
+                null);
     }
 
     public PostTransformOperatorBuilder addTransform(
@@ -66,6 +67,30 @@ public class PostTransformOperatorBuilder {
             String tableOptionsDelimiter,
             String postTransformConverter,
             SupportedMetadataColumn[] supportedMetadataColumns) {
+        return addTransform(
+                tableInclusions,
+                projection,
+                filter,
+                primaryKey,
+                partitionKey,
+                tableOptions,
+                tableOptionsDelimiter,
+                postTransformConverter,
+                supportedMetadataColumns,
+                null);
+    }
+
+    public PostTransformOperatorBuilder addTransform(
+            String tableInclusions,
+            @Nullable String projection,
+            @Nullable String filter,
+            String primaryKey,
+            String partitionKey,
+            String tableOptions,
+            String tableOptionsDelimiter,
+            String postTransformConverter,
+            SupportedMetadataColumn[] supportedMetadataColumns,
+            @Nullable String castAllColumnsTo) {
         transformRules.add(
                 new TransformRule(
                         tableInclusions,
@@ -76,7 +101,8 @@ public class PostTransformOperatorBuilder {
                         tableOptions,
                         tableOptionsDelimiter,
                         postTransformConverter,
-                        supportedMetadataColumns));
+                        supportedMetadataColumns,
+                        castAllColumnsTo));
         return this;
     }
 

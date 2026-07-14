@@ -3259,4 +3259,183 @@ class PostTransformOperatorTest {
                         transformFunctionEventEventOperatorTestHarness.getOutputRecords().poll())
                 .isEqualTo(new StreamRecord<>(updateEventExpect));
     }
+
+    // --------------------------------------------------------------------------
+    // Tests for cast-all-columns-to
+    // --------------------------------------------------------------------------
+
+    private static final TableId CAST_ALL_TABLEID =
+            TableId.tableId("my_company", "my_branch", "cast_all_table");
+
+    /**
+     * Source schema with mixed types: INT primary key, VARCHAR, BIGINT, DOUBLE, BOOLEAN columns.
+     */
+    private static final Schema CAST_ALL_SOURCE_SCHEMA =
+            Schema.newBuilder()
+                    .physicalColumn("id", DataTypes.INT().notNull())
+                    .physicalColumn("name", DataTypes.VARCHAR(255))
+                    .physicalColumn("score", DataTypes.BIGINT())
+                    .physicalColumn("ratio", DataTypes.DOUBLE())
+                    .physicalColumn("active", DataTypes.BOOLEAN())
+                    .primaryKey("id")
+                    .build();
+
+    /**
+     * Expected output schema when cast-all-columns-to: STRING is applied. Primary key column stays
+     * NOT NULL; all other columns become nullable STRING.
+     */
+    private static final Schema CAST_ALL_TARGET_SCHEMA_STRING =
+            Schema.newBuilder()
+                    .physicalColumn("id", DataTypes.STRING().notNull())
+                    .physicalColumn("name", DataTypes.STRING())
+                    .physicalColumn("score", DataTypes.STRING())
+                    .physicalColumn("ratio", DataTypes.STRING())
+                    .physicalColumn("active", DataTypes.STRING())
+                    .primaryKey("id")
+                    .build();
+
+    @Test
+    void testCastAllColumnsToStringSchema() throws Exception {
+        PostTransformOperator transform =
+                PostTransformOperator.newBuilder()
+                        .addTransform(
+                                CAST_ALL_TABLEID.identifier(),
+                                null,
+                                null,
+                                "id",
+                                null,
+                                null,
+                                ",",
+                                null,
+                                new SupportedMetadataColumn[0],
+                                "STRING")
+                        .build();
+
+        RegularEventOperatorTestHarness<PostTransformOperator, Event> harness =
+                RegularEventOperatorTestHarness.with(transform, 1);
+        harness.open();
+
+        // CreateTableEvent should produce the target schema
+        CreateTableEvent createEvent =
+                new CreateTableEvent(CAST_ALL_TABLEID, CAST_ALL_SOURCE_SCHEMA);
+        transform.processElement(new StreamRecord<>(createEvent));
+        Assertions.assertThat(harness.getOutputRecords().poll())
+                .isEqualTo(
+                        new StreamRecord<>(
+                                new CreateTableEvent(
+                                        CAST_ALL_TABLEID, CAST_ALL_TARGET_SCHEMA_STRING)));
+
+        harness.close();
+    }
+
+    @Test
+    void testCastAllColumnsToStringDataValues() throws Exception {
+        PostTransformOperator transform =
+                PostTransformOperator.newBuilder()
+                        .addTransform(
+                                CAST_ALL_TABLEID.identifier(),
+                                null,
+                                null,
+                                "id",
+                                null,
+                                null,
+                                ",",
+                                null,
+                                new SupportedMetadataColumn[0],
+                                "STRING")
+                        .build();
+
+        RegularEventOperatorTestHarness<PostTransformOperator, Event> harness =
+                RegularEventOperatorTestHarness.with(transform, 1);
+        harness.open();
+
+        // Register the table first
+        transform.processElement(
+                new StreamRecord<>(new CreateTableEvent(CAST_ALL_TABLEID, CAST_ALL_SOURCE_SCHEMA)));
+        harness.getOutputRecords().poll(); // discard CreateTableEvent output
+
+        BinaryRecordDataGenerator sourceGen =
+                new BinaryRecordDataGenerator(((RowType) CAST_ALL_SOURCE_SCHEMA.toRowDataType()));
+        BinaryRecordDataGenerator targetGen =
+                new BinaryRecordDataGenerator(
+                        ((RowType) CAST_ALL_TARGET_SCHEMA_STRING.toRowDataType()));
+
+        // Input row: id=1, name="Alice", score=100, ratio=0.95, active=true
+        DataChangeEvent insertEvent =
+                DataChangeEvent.insertEvent(
+                        CAST_ALL_TABLEID,
+                        sourceGen.generate(
+                                new Object[] {
+                                    1,
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("Alice"),
+                                    100L,
+                                    0.95d,
+                                    true
+                                }));
+
+        // Expected: all values cast to STRING
+        DataChangeEvent expectedEvent =
+                DataChangeEvent.insertEvent(
+                        CAST_ALL_TABLEID,
+                        targetGen.generate(
+                                new Object[] {
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("1"),
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("Alice"),
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("100"),
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("0.95"),
+                                    org.apache.flink.cdc.common.data.binary.BinaryStringData
+                                            .fromString("true")
+                                }));
+
+        transform.processElement(new StreamRecord<>(insertEvent));
+        Assertions.assertThat(harness.getOutputRecords().poll())
+                .isEqualTo(new StreamRecord<>(expectedEvent));
+
+        harness.close();
+    }
+
+    @Test
+    void testCastAllColumnsToWithProjection() throws Exception {
+        // When projection selects a subset of columns AND cast-all-columns-to is set,
+        // only projected columns appear in output, all cast to target type.
+        PostTransformOperator transform =
+                PostTransformOperator.newBuilder()
+                        .addTransform(
+                                CAST_ALL_TABLEID.identifier(),
+                                "id, name", // only these two columns
+                                null,
+                                "id",
+                                null,
+                                null,
+                                ",",
+                                null,
+                                new SupportedMetadataColumn[0],
+                                "STRING")
+                        .build();
+
+        Schema expectedProjectedSchema =
+                Schema.newBuilder()
+                        .physicalColumn("id", DataTypes.STRING().notNull())
+                        .physicalColumn("name", DataTypes.STRING())
+                        .primaryKey("id")
+                        .build();
+
+        RegularEventOperatorTestHarness<PostTransformOperator, Event> harness =
+                RegularEventOperatorTestHarness.with(transform, 1);
+        harness.open();
+
+        transform.processElement(
+                new StreamRecord<>(new CreateTableEvent(CAST_ALL_TABLEID, CAST_ALL_SOURCE_SCHEMA)));
+        Assertions.assertThat(harness.getOutputRecords().poll())
+                .isEqualTo(
+                        new StreamRecord<>(
+                                new CreateTableEvent(CAST_ALL_TABLEID, expectedProjectedSchema)));
+
+        harness.close();
+    }
 }

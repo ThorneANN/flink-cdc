@@ -29,8 +29,10 @@ import org.apache.flink.cdc.common.event.DataChangeEvent;
 import org.apache.flink.cdc.common.event.Event;
 import org.apache.flink.cdc.common.event.SchemaChangeEvent;
 import org.apache.flink.cdc.common.event.TableId;
+import org.apache.flink.cdc.common.schema.Column;
 import org.apache.flink.cdc.common.schema.Schema;
 import org.apache.flink.cdc.common.schema.Selectors;
+import org.apache.flink.cdc.common.types.DataType;
 import org.apache.flink.cdc.common.udf.UserDefinedFunctionContext;
 import org.apache.flink.cdc.common.utils.SchemaUtils;
 import org.apache.flink.cdc.runtime.operators.AbstractStreamOperatorAdapter;
@@ -295,11 +297,18 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
         boolean beforeFilterPassed = false;
         boolean afterFilterPassed = false;
 
+        DataType castAllColumnsToType = effectiveTransformer.getCastAllColumnsToType().orElse(null);
+
         if (event.before() != null) {
             context.opType = beforeOp;
             Tuple2<BinaryRecordData, Boolean> result =
                     transformRecord(
-                            event.before(), info, projectionProcessor, filterProcessor, context);
+                            event.before(),
+                            info,
+                            projectionProcessor,
+                            filterProcessor,
+                            context,
+                            castAllColumnsToType);
             beforeRow = result.f0;
             beforeFilterPassed = result.f1;
         }
@@ -307,7 +316,12 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
             context.opType = afterOp;
             Tuple2<BinaryRecordData, Boolean> result =
                     transformRecord(
-                            event.after(), info, projectionProcessor, filterProcessor, context);
+                            event.after(),
+                            info,
+                            projectionProcessor,
+                            filterProcessor,
+                            context,
+                            castAllColumnsToType);
             afterRow = result.f0;
             afterFilterPassed = result.f1;
         }
@@ -369,10 +383,29 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
                         preSchema.getColumns(),
                         udfDescriptors,
                         transformer.getSupportedMetadataColumns());
-        return preSchema.copy(
+
+        List<Column> outputColumns =
                 projectionColumns.stream()
                         .map(ProjectionColumn::getColumn)
-                        .collect(Collectors.toList()));
+                        .collect(Collectors.toList());
+
+        // If cast-all-columns-to is configured, replace every output column's type while
+        // preserving the original column's nullability (so NOT NULL primary-key columns stay
+        // NOT NULL after the cast).
+        if (transformer.getCastAllColumnsToType().isPresent()) {
+            DataType targetType = transformer.getCastAllColumnsToType().get();
+            outputColumns =
+                    outputColumns.stream()
+                            .map(
+                                    col ->
+                                            col.copy(
+                                                    col.getType().isNullable()
+                                                            ? targetType.nullable()
+                                                            : targetType.notNull()))
+                            .collect(Collectors.toList());
+        }
+
+        return preSchema.copy(outputColumns);
     }
 
     /** Projects given {@link RecordData} based on given processor. */
@@ -381,7 +414,8 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
             PostTransformChangeInfo info,
             @Nullable TransformProjectionProcessor projectionProcessor,
             @Nullable TransformFilterProcessor filterProcessor,
-            TransformContext context) {
+            TransformContext context,
+            @Nullable DataType castAllColumnsToType) {
         RecordData.FieldGetter[] preFieldGetters = info.getPreTransformedFieldGetters();
         Schema preSchema = info.getPreTransformedSchema();
         Schema postSchema = info.getPostTransformedSchema();
@@ -406,9 +440,14 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
 
         Object[] postRowBinary = new Object[postSchema.getColumnCount()];
         for (int i = 0; i < postRow.length; i++) {
-            postRowBinary[i] =
-                    BinaryInternalObjectConverter.convertToInternal(
-                            postRow[i], postSchema.getColumnDataTypes().get(i));
+            DataType targetType = postSchema.getColumnDataTypes().get(i);
+            Object value = postRow[i];
+            // If cast-all-columns-to is configured, cast each Java-layer value to the target type
+            // before encoding it into the internal binary format.
+            if (castAllColumnsToType != null) {
+                value = CastAllColumnsTypeParser.castValue(value, targetType);
+            }
+            postRowBinary[i] = BinaryInternalObjectConverter.convertToInternal(value, targetType);
         }
         return Tuple2.of(postGenerator.generate(postRowBinary), filterPassed);
     }
@@ -495,6 +534,14 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
             String tableInclusions = rule.getTableInclusions();
             Selectors selectors =
                     new Selectors.SelectorsBuilder().includeTables(tableInclusions).build();
+
+            // Parse castAllColumnsTo string into DataType once at initialization time to avoid
+            // repeated parsing on the hot path.
+            org.apache.flink.cdc.common.types.DataType castAllColumnsToType = null;
+            if (rule.getCastAllColumnsTo() != null) {
+                castAllColumnsToType = CastAllColumnsTypeParser.parse(rule.getCastAllColumnsTo());
+            }
+
             PostTransformer apply =
                     new PostTransformer(
                             selectors,
@@ -502,7 +549,8 @@ public class PostTransformOperator extends AbstractStreamOperatorAdapter<Event>
                             TransformFilter.of(filterExpression).orElse(null),
                             PostTransformConverters.of(rule.getPostTransformConverter())
                                     .orElse(null),
-                            rule.getSupportedMetadataColumns());
+                            rule.getSupportedMetadataColumns(),
+                            castAllColumnsToType);
             list.add(apply);
         }
         return list;

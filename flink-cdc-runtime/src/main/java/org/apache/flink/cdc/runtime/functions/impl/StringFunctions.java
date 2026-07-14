@@ -23,6 +23,9 @@ import org.apache.flink.cdc.common.types.variant.Variant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -164,6 +167,120 @@ public class StringFunctions {
         } catch (Throwable e) {
             return null;
         }
+    }
+
+    /**
+     * Serializes a value to its JSON string representation.
+     *
+     * <p>Type mapping (after {@code JavaObjectConverter.convertToJava}):
+     *
+     * <ul>
+     *   <li>{@code null} → {@code "null"}
+     *   <li>{@code Boolean} → {@code "true"} / {@code "false"}
+     *   <li>Numeric types ({@code Integer}, {@code Long}, {@code Float}, {@code Double}, {@code
+     *       BigDecimal}, etc.) → number literal
+     *   <li>{@code String} → quoted, with JSON-escaped special characters
+     *   <li>{@code List} → JSON array (recursive)
+     *   <li>{@code Map} → JSON object (recursive, keys coerced to strings)
+     *   <li>Other types ({@code LocalDate}, {@code LocalDateTime}, etc.) → quoted {@code
+     *       toString()}
+     * </ul>
+     *
+     * @param value the Java-layer value to serialize (may be null)
+     * @return JSON string, or {@code null} if input is {@code null}
+     */
+    public static String toJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+        return serializeToJson(value);
+    }
+
+    private static String serializeToJson(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof Boolean) {
+            return value.toString();
+        }
+        if (value instanceof Integer
+                || value instanceof Long
+                || value instanceof Short
+                || value instanceof Byte
+                || value instanceof Float
+                || value instanceof Double
+                || value instanceof BigDecimal) {
+            return value.toString();
+        }
+        if (value instanceof String) {
+            return "\"" + escapeJsonString((String) value) + "\"";
+        }
+        if (value instanceof List) {
+            StringBuilder sb = new StringBuilder("[");
+            List<?> list = (List<?>) value;
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) {
+                    sb.append(",");
+                }
+                sb.append(serializeToJson(list.get(i)));
+            }
+            return sb.append("]").toString();
+        }
+        if (value instanceof Map) {
+            StringBuilder sb = new StringBuilder("{");
+            Map<?, ?> map = (Map<?, ?>) value;
+            boolean first = true;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!first) {
+                    sb.append(",");
+                }
+                sb.append("\"")
+                        .append(escapeJsonString(String.valueOf(entry.getKey())))
+                        .append("\":")
+                        .append(serializeToJson(entry.getValue()));
+                first = false;
+            }
+            return sb.append("}").toString();
+        }
+        // Fallback: temporal types (LocalDate, LocalDateTime, etc.) and others
+        return "\"" + escapeJsonString(value.toString()) + "\"";
+    }
+
+    private static String escapeJsonString(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 4);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\b':
+                    sb.append("\\b");
+                    break;
+                case '\f':
+                    sb.append("\\f");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
 
     public static Variant parseJson(String jsonStr) {

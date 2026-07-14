@@ -463,4 +463,13 @@ public class TransformSqlOperatorTable extends ReflectiveSqlOperatorTable {
                             OperandTypes.family(SqlTypeFamily.STRING),
                             OperandTypes.family(SqlTypeFamily.STRING, SqlTypeFamily.BOOLEAN)),
                     SqlFunctionCategory.USER_DEFINED_FUNCTION);
+
+    public static final SqlFunction TO_JSON =
+            new SqlFunction(
+                    "TO_JSON",
+                    SqlKind.OTHER_FUNCTION,
+                    ReturnTypes.explicit(SqlTypeName.VARCHAR),
+                    null,
+                    OperandTypes.ANY,
+                    SqlFunctionCategory.USER_DEFINED_FUNCTION);
 }
