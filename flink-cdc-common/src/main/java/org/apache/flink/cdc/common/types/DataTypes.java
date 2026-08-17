@@ -423,6 +423,18 @@ public class DataTypes {
         return new VariantType();
     }
 
+    /**
+     * Data type of a JSON document represented as a UTF-8 encoded string.
+     *
+     * <p>Use this type for source connectors that expose JSON payloads as text (e.g. MySQL {@code
+     * JSON}, PostgreSQL {@code json}/{@code jsonb}) and for sinks that consume JSON directly.
+     *
+     * @see JsonType
+     */
+    public static JsonType JSON() {
+        return new JsonType();
+    }
+
     public static OptionalInt getPrecision(DataType dataType) {
         return dataType.accept(PRECISION_EXTRACTOR);
     }

@@ -31,6 +31,7 @@ import org.apache.flink.cdc.common.types.DecimalType;
 import org.apache.flink.cdc.common.types.DoubleType;
 import org.apache.flink.cdc.common.types.FloatType;
 import org.apache.flink.cdc.common.types.IntType;
+import org.apache.flink.cdc.common.types.JsonType;
 import org.apache.flink.cdc.common.types.LocalZonedTimestampType;
 import org.apache.flink.cdc.common.types.MapType;
 import org.apache.flink.cdc.common.types.RowType;
@@ -180,6 +181,9 @@ public class DataTypeSerializer extends TypeSerializer<DataType> {
         } else if (record instanceof VariantType) {
             enumSerializer.serialize(DataTypeClass.VARIANT, target);
             target.writeBoolean(record.isNullable());
+        } else if (record instanceof JsonType) {
+            enumSerializer.serialize(DataTypeClass.JSON, target);
+            target.writeBoolean(record.isNullable());
         } else {
             throw new IllegalArgumentException("Unknown data type : " + record);
         }
@@ -243,6 +247,8 @@ public class DataTypeSerializer extends TypeSerializer<DataType> {
                 return new BigIntType(isNullable);
             case VARIANT:
                 return new VariantType(isNullable);
+            case JSON:
+                return new JsonType(isNullable);
             default:
                 throw new IllegalArgumentException("Unknown data type : " + dataTypeClass);
         }
@@ -312,6 +318,7 @@ public class DataTypeSerializer extends TypeSerializer<DataType> {
         ZONED_TIMESTAMP,
         DOUBLE,
         BIGINT,
-        VARIANT
+        VARIANT,
+        JSON
     }
 }

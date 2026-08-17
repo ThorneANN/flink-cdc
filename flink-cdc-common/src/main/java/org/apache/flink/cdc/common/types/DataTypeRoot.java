@@ -106,7 +106,9 @@ public enum DataTypeRoot {
 
     ROW(DataTypeFamily.CONSTRUCTED),
 
-    VARIANT(DataTypeFamily.EXTENSION);
+    VARIANT(DataTypeFamily.EXTENSION),
+
+    JSON(DataTypeFamily.PREDEFINED, DataTypeFamily.CHARACTER_STRING, DataTypeFamily.EXTENSION);
 
     private final Set<DataTypeFamily> families;
 

@@ -90,7 +90,8 @@ class DataTypeSerializerTest extends SerializerTestBase<DataType> {
                     DataTypes.ROW(
                             DataTypes.FIELD("f1", DataTypes.STRING()),
                             DataTypes.FIELD("f2", DataTypes.STRING(), "desc")),
-                    DataTypes.ROW(DataTypes.SMALLINT(), DataTypes.STRING())
+                    DataTypes.ROW(DataTypes.SMALLINT(), DataTypes.STRING()),
+                    DataTypes.JSON()
                 };
         return Stream.concat(
                         Arrays.stream(allTypes), Arrays.stream(allTypes).map(DataType::notNull))

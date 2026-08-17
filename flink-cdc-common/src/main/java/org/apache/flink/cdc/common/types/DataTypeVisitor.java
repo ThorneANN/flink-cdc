@@ -71,4 +71,8 @@ public interface DataTypeVisitor<R> {
     default R visit(VariantType variantType) {
         throw new UnsupportedOperationException("VariantType was not supported.");
     }
+
+    default R visit(JsonType jsonType) {
+        throw new UnsupportedOperationException("JsonType was not supported.");
+    }
 }
