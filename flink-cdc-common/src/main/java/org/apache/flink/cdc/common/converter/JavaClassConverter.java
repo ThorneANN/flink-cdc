@@ -39,6 +39,7 @@ import org.apache.flink.cdc.common.types.TinyIntType;
 import org.apache.flink.cdc.common.types.VarBinaryType;
 import org.apache.flink.cdc.common.types.VarCharType;
 import org.apache.flink.cdc.common.types.VariantType;
+import org.apache.flink.cdc.common.types.JsonType;
 import org.apache.flink.cdc.common.types.ZonedTimestampType;
 import org.apache.flink.cdc.common.types.variant.Variant;
 
@@ -170,5 +171,10 @@ public class JavaClassConverter implements DataTypeVisitor<Class<?>> {
     @Override
     public Class<?> visit(VariantType variantType) {
         return Variant.class;
+    }
+
+    @Override
+    public Class<?> visit(JsonType jsonType) {
+        return String.class;
     }
 }

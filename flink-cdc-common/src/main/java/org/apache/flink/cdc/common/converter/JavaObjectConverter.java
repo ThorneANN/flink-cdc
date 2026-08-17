@@ -39,6 +39,7 @@ import org.apache.flink.cdc.common.types.TinyIntType;
 import org.apache.flink.cdc.common.types.VarBinaryType;
 import org.apache.flink.cdc.common.types.VarCharType;
 import org.apache.flink.cdc.common.types.VariantType;
+import org.apache.flink.cdc.common.types.JsonType;
 import org.apache.flink.cdc.common.types.ZonedTimestampType;
 
 import java.math.BigDecimal;
@@ -160,6 +161,11 @@ public class JavaObjectConverter {
         @Override
         public Function<Object, ?> visit(VariantType variantType) {
             return o -> CommonConverter.convertToVariant(o, variantType);
+        }
+
+        @Override
+        public Function<Object, String> visit(JsonType jsonType) {
+            return CommonConverter::convertToString;
         }
     }
 
