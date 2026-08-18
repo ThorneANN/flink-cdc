@@ -61,6 +61,8 @@ public enum ColumnType {
     // MySQL 8.0.18, so the only affected version is 8.0.17.
     // https://github.com/mysql/mysql-server/commit/9082b6a820f3948fd563cc32a050f5e8775f2855#diff-b9bac49e04a17ad0503e56a4c53d979c90eb64618387d20b9ea2cf1dbf47e5e7L25
     TYPED_ARRAY_OLD(244),
+    // VECTOR type introduced in MySQL 9.0 (MYSQL_TYPE_VECTOR = 242)
+    VECTOR(242),
     JSON(245),
     NEWDECIMAL(246),
     ENUM(247),

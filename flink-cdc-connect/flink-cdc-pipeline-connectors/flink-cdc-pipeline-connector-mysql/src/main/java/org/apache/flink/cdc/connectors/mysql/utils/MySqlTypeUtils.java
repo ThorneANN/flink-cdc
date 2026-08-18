@@ -109,6 +109,7 @@ public class MySqlTypeUtils {
     private static final String MULTIPOINT = "MULTIPOINT";
     private static final String MULTIPOLYGON = "MULTIPOLYGON";
     private static final String MULTILINESTRING = "MULTILINESTRING";
+    private static final String VECTOR = "VECTOR";
     private static final String UNKNOWN = "UNKNOWN";
     private static final int FLOAT_LENGTH_UNSPECIFIED_FLAG = -1;
 
@@ -250,6 +251,8 @@ public class MySqlTypeUtils {
                 return DataTypes.BYTES();
             case SET:
                 return DataTypes.ARRAY(DataTypes.STRING());
+            case VECTOR:
+                return DataTypes.ARRAY(DataTypes.FLOAT());
             default:
                 throw new UnsupportedOperationException(
                         String.format("MySQL type '%s' is not supported yet.", typeName));

@@ -104,6 +104,7 @@ public class MySqlTypeUtils {
     private static final String MULTIPOINT = "MULTIPOINT";
     private static final String MULTIPOLYGON = "MULTIPOLYGON";
     private static final String MULTILINESTRING = "MULTILINESTRING";
+    private static final String VECTOR = "VECTOR";
     private static final String UNKNOWN = "UNKNOWN";
 
     /** Returns a corresponding Flink data type from a debezium {@link Column}. */
@@ -232,6 +233,8 @@ public class MySqlTypeUtils {
                 return DataTypes.BYTES();
             case SET:
                 return DataTypes.ARRAY(DataTypes.STRING());
+            case VECTOR:
+                return DataTypes.ARRAY(DataTypes.FLOAT());
             default:
                 throw new UnsupportedOperationException(
                         String.format("Don't support MySQL type '%s' yet.", typeName));
