@@ -31,11 +31,6 @@ import java.util.TimeZone;
  * Whole class is basically a mix of <a href="https://code.google.com/p/open-replicator">open-replicator</a>'s
  * AbstractRowEventParser and MySQLUtils. Main purpose here is to ease rows deserialization.<p>
  *
- * Copied from mysql-binlog-connector 0.27.2 to add MySQL 9.0 VECTOR column support.
- * See {@link #deserializeVector(int, ByteArrayInputStream)} and the {@code case VECTOR} branch
- * in {@link #deserializeCell(ColumnType, int, int, ByteArrayInputStream)}.
- * Remove this override once mysql-binlog-connector-java ships native VECTOR handling.
- *
  * Current {@link ColumnType} to java type mapping is following:
  * <pre>
  * {@link ColumnType#TINY}: Integer
@@ -80,6 +75,7 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
     private Long invalidDateAndTimeRepresentation;
     private boolean microsecondsPrecision;
     private boolean deserializeCharAndBinaryAsByteArray;
+    private boolean deserializeIntegerAsByteArray;
 
     public AbstractRowsEventDataDeserializer(Map<Long, TableMapEventData> tableMapEventByTableId) {
         this.tableMapEventByTableId = tableMapEventByTableId;
@@ -100,6 +96,10 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
 
     void setDeserializeCharAndBinaryAsByteArray(boolean value) {
         this.deserializeCharAndBinaryAsByteArray = value;
+    }
+
+    void setDeserializeIntegerAsByteArray(boolean deserializeIntegerAsByteArray) {
+        this.deserializeIntegerAsByteArray = deserializeIntegerAsByteArray;
     }
 
     protected Serializable[] deserializeRow(long tableId, BitSet includedColumns, ByteArrayInputStream inputStream)
@@ -213,15 +213,15 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
      */
     protected Serializable deserializeVector(int meta, ByteArrayInputStream inputStream) throws IOException {
         int payloadLength = inputStream.readInteger(meta);
+        byte[] payload = inputStream.read(payloadLength);
         int dimensions = payloadLength / 4;
         float[] vector = new float[dimensions];
         for (int i = 0; i < dimensions; i++) {
-            // MySQL stores vector floats in little-endian order.
-            int b0 = inputStream.read(1)[0] & 0xFF;
-            int b1 = inputStream.read(1)[0] & 0xFF;
-            int b2 = inputStream.read(1)[0] & 0xFF;
-            int b3 = inputStream.read(1)[0] & 0xFF;
-            int bits = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0;
+            int offset = i * 4;
+            int bits = (payload[offset] & 0xFF)
+                    | ((payload[offset + 1] & 0xFF) << 8)
+                    | ((payload[offset + 2] & 0xFF) << 16)
+                    | ((payload[offset + 3] & 0xFF) << 24);
             vector[i] = Float.intBitsToFloat(bits);
         }
         return vector;
@@ -233,22 +233,37 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
     }
 
     protected Serializable deserializeTiny(ByteArrayInputStream inputStream) throws IOException {
+        if (deserializeIntegerAsByteArray) {
+            return inputStream.read(1);
+        }
         return (int) ((byte) inputStream.readInteger(1));
     }
 
     protected Serializable deserializeShort(ByteArrayInputStream inputStream) throws IOException {
+        if (deserializeIntegerAsByteArray) {
+            return inputStream.read(2);
+        }
         return (int) ((short) inputStream.readInteger(2));
     }
 
     protected Serializable deserializeInt24(ByteArrayInputStream inputStream) throws IOException {
+        if (deserializeIntegerAsByteArray) {
+            return inputStream.read(3);
+        }
         return (inputStream.readInteger(3) << 8) >> 8;
     }
 
     protected Serializable deserializeLong(ByteArrayInputStream inputStream) throws IOException {
+        if (deserializeIntegerAsByteArray) {
+            return inputStream.read(4);
+        }
         return inputStream.readInteger(4);
     }
 
     protected Serializable deserializeLongLong(ByteArrayInputStream inputStream) throws IOException {
+        if (deserializeIntegerAsByteArray) {
+            return inputStream.read(8);
+        }
         return inputStream.readLong(8);
     }
 
@@ -441,7 +456,6 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
         return inputStream.read(blobLength);
     }
 
-    // checkstyle, please ignore ParameterNumber for the next line
     protected Long asUnixTime(int year, int month, int day, int hour, int minute, int second, int millis) {
         // https://dev.mysql.com/doc/refman/5.0/en/datetime.html
         if (year == 0 || month == 0 || day == 0) {
@@ -482,9 +496,6 @@ public abstract class AbstractRowsEventDataDeserializer<T extends EventData> imp
         return result;
     }
 
-    /**
-     * see mysql/strings/decimal.c
-     */
     public static BigDecimal asBigDecimal(int precision, int scale, byte[] value) {
         boolean positive = (value[0] & 0x80) == 0x80;
         value[0] ^= 0x80;
