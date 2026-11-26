@@ -44,8 +44,9 @@ class SqlServerChunkKeyColumnOptionTest {
 
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
     private static final String CHUNK_KEY_COLUMN = "scan.incremental.snapshot.chunk.key-column";
-    private static final String CHUNK_KEY_BY_TABLE =
-            "scan.incremental.snapshot.chunk.key-column-by-table.";
+    private static final String CHUNK_KEY_MAP =
+            "scan.incremental.snapshot.chunk.key-column-by-table";
+    private static final String CHUNK_KEY_BY_TABLE = CHUNK_KEY_MAP + ".";
 
     private static final List<TableId> TABLES =
             Arrays.asList(
@@ -63,6 +64,148 @@ class SqlServerChunkKeyColumnOptionTest {
         assertThat(sourceConfig.getChunkKeyColumn()).isEqualTo(columnName);
         assertThat(chunkKey(sourceConfig, "dbo", "orders")).isEqualTo(columnName);
         assertThat(chunkKey(sourceConfig, "audit", "orders")).isEqualTo(columnName);
+    }
+
+    @Test
+    void parsesTableChunkKeysFromYamlBlockScalar() throws Exception {
+        SqlServerSourceConfig sourceConfig =
+                configureYaml(
+                        CHUNK_KEY_COLUMN
+                                + ": id\n"
+                                + CHUNK_KEY_MAP
+                                + ": |\n"
+                                + "  inventory.dbo.orders: order_id\n"
+                                + "  inventory.dbo.users: user_id\n"
+                                + "  inventory.audit.orders: audit_id\n");
+
+        assertThat(chunkKey(sourceConfig, "dbo", "orders")).isEqualTo("order_id");
+        assertThat(chunkKey(sourceConfig, "dbo", "users")).isEqualTo("user_id");
+        assertThat(chunkKey(sourceConfig, "audit", "orders")).isEqualTo("audit_id");
+        assertThat(chunkKey(sourceConfig, "dbo", "products")).isEqualTo("id");
+    }
+
+    @Test
+    void preservesRegexColonsAndColumnPunctuationInYamlMap() throws Exception {
+        SqlServerSourceConfig sourceConfig =
+                configureYaml(
+                        CHUNK_KEY_MAP
+                                + ": |\n"
+                                + "  'inventory.dbo.(?:orders|users)': 'tenant:id;part]'\n"
+                                + "  inventory.audit.orders: ' tenant''s:id;part] '\n"
+                                + CHUNK_KEY_COLUMN
+                                + ": 'default:id;part'\n");
+
+        assertThat(chunkKey(sourceConfig, "dbo", "orders")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(sourceConfig, "dbo", "users")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(sourceConfig, "audit", "orders")).isEqualTo(" tenant's:id;part] ");
+        assertThat(chunkKey(sourceConfig, "dbo", "products")).isEqualTo("default:id;part");
+    }
+
+    @Test
+    void combinesMapAndFlatOptionsForDifferentPatterns() {
+        SqlServerSourceConfig sourceConfig =
+                configure(
+                        Map.of(
+                                CHUNK_KEY_MAP,
+                                "inventory.dbo.orders: order_id",
+                                CHUNK_KEY_BY_TABLE + "inventory.dbo.users",
+                                "user_id"));
+
+        assertThat(chunkKey(sourceConfig, "dbo", "orders")).isEqualTo("order_id");
+        assertThat(chunkKey(sourceConfig, "dbo", "users")).isEqualTo("user_id");
+        assertThat(chunkKey(sourceConfig, "dbo", "products")).isNull();
+    }
+
+    @Test
+    void acceptsEmptyTableChunkKeyMap() {
+        assertThat(chunkKey(configure(Map.of(CHUNK_KEY_MAP, "{}")), "dbo", "orders")).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "[id]", "null", ""})
+    void rejectsNonMapTableChunkKeys(String value) {
+        assertThatThrownBy(() -> configure(Map.of(CHUNK_KEY_MAP, value)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CHUNK_KEY_MAP)
+                .hasMessageContaining("must be a map");
+    }
+
+    @Test
+    void rejectsNonStringMappedColumn() {
+        assertThatThrownBy(() -> configure(Map.of(CHUNK_KEY_MAP, "inventory.dbo.orders: [id]")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("inventory.dbo.orders")
+                .hasMessageContaining("must be a string");
+    }
+
+    @Test
+    void rejectsMalformedTableChunkKeyMap() {
+        assertThatThrownBy(() -> configure(Map.of(CHUNK_KEY_MAP, "inventory.dbo.orders: [")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid source option")
+                .hasMessageContaining(CHUNK_KEY_MAP);
+    }
+
+    @Test
+    void rejectsDuplicatePatternsInMap() {
+        assertThatThrownBy(
+                        () ->
+                                configure(
+                                        Map.of(
+                                                CHUNK_KEY_MAP,
+                                                "inventory.dbo.orders: id\ninventory.dbo.orders: order_id")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid source option")
+                .hasMessageContaining(CHUNK_KEY_MAP);
+    }
+
+    @Test
+    void rejectsDuplicatePatternsAcrossMapAndFlatOptions() {
+        assertThatThrownBy(
+                        () ->
+                                configure(
+                                        Map.of(
+                                                CHUNK_KEY_MAP,
+                                                "inventory.dbo.orders: id",
+                                                CHUNK_KEY_BY_TABLE + "inventory.dbo.orders",
+                                                "id")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate chunk key configuration")
+                .hasMessageContaining("inventory.dbo.orders");
+    }
+
+    @Test
+    void rejectsConflictingMapPatterns() {
+        assertThatThrownBy(
+                        () ->
+                                configure(
+                                        Map.of(
+                                                CHUNK_KEY_MAP,
+                                                "'inventory.dbo.(?:orders|users)': id\n"
+                                                        + "inventory.dbo.orders: order_id")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Conflicting chunk key columns")
+                .hasMessageContaining("inventory.dbo.orders");
+    }
+
+    @Test
+    void rejectsBlankColumnInMap() {
+        assertThatThrownBy(() -> configure(Map.of(CHUNK_KEY_MAP, "inventory.dbo.orders: ' '")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("non-blank column name");
+    }
+
+    @Test
+    void rejectsMultipleMapDocuments() {
+        assertThatThrownBy(
+                        () ->
+                                configure(
+                                        Map.of(
+                                                CHUNK_KEY_MAP,
+                                                "inventory.dbo.orders: id\n---\ninventory.dbo.users: user_id")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid source option")
+                .hasMessageContaining(CHUNK_KEY_MAP);
     }
 
     @Test

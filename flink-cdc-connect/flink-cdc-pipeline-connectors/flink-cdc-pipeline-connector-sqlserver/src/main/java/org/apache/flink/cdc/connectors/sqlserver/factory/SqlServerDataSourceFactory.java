@@ -38,6 +38,12 @@ import org.apache.flink.cdc.connectors.sqlserver.utils.SqlServerSchemaUtils;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectPath;
 
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +63,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.cdc.connectors.base.utils.ObjectUtils.doubleCompare;
+import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMN_BY_TABLE;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMN_BY_TABLE_PREFIX;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_LOWER_BOUND;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_UPPER_BOUND;
@@ -93,6 +100,12 @@ import static org.apache.flink.util.Preconditions.checkState;
 public class SqlServerDataSourceFactory implements DataSourceFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(SqlServerDataSourceFactory.class);
+
+    private static final ObjectMapper CHUNK_KEY_MAPPER =
+            new ObjectMapper(new YAMLFactory())
+                    .enable(
+                            DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY,
+                            DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     public static final String IDENTIFIER = "sqlserver";
 
@@ -214,13 +227,9 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
             List<TableId> tableIds,
             Set<String> capturedTables) {
         Map<ObjectPath, String> chunkKeys = new HashMap<>();
-        for (Map.Entry<String, String> option : options.entrySet()) {
-            String key = option.getKey();
-            if (!key.startsWith(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX)) {
-                continue;
-            }
-
-            String patterns = key.substring(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX.length());
+        for (Map.Entry<String, String> option : tableChunkKeyColumns(options).entrySet()) {
+            String patterns = option.getKey();
+            String key = CHUNK_KEY_COLUMN_BY_TABLE_PREFIX + patterns;
             String column = option.getValue();
             String[] tablePatterns = Predicates.RegExSplitterByComma.split(patterns);
             if (tablePatterns.length == 0
@@ -252,7 +261,52 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
                 }
             }
         }
-        chunkKeys.forEach(configFactory::chunkKeyColumn);
+        configFactory.chunkKeyColumns(chunkKeys);
+    }
+
+    private static Map<String, String> tableChunkKeyColumns(Map<String, String> options) {
+        Map<String, String> columns = new HashMap<>();
+        String configuredMap = options.get(CHUNK_KEY_COLUMN_BY_TABLE.key());
+        if (configuredMap != null) {
+            JsonNode mappings;
+            try {
+                mappings = CHUNK_KEY_MAPPER.readTree(configuredMap);
+            } catch (JsonProcessingException e) {
+                throw new IllegalArgumentException(
+                        "Invalid source option '" + CHUNK_KEY_COLUMN_BY_TABLE.key() + "'.", e);
+            }
+            if (mappings == null || !mappings.isObject()) {
+                throw new IllegalArgumentException(
+                        "Source option '"
+                                + CHUNK_KEY_COLUMN_BY_TABLE.key()
+                                + "' must be a map from table patterns to column names. "
+                                + "Use a YAML block scalar ('|') to pass the map as a string.");
+            }
+            mappings.fields()
+                    .forEachRemaining(
+                            entry -> {
+                                if (!entry.getValue().isTextual()) {
+                                    throw new IllegalArgumentException(
+                                            "Chunk key column for table pattern '"
+                                                    + entry.getKey()
+                                                    + "' must be a string.");
+                                }
+                                columns.put(entry.getKey(), entry.getValue().textValue());
+                            });
+        }
+        for (Map.Entry<String, String> option : options.entrySet()) {
+            if (option.getKey().startsWith(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX)) {
+                String pattern =
+                        option.getKey().substring(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX.length());
+                if (columns.putIfAbsent(pattern, option.getValue()) != null) {
+                    throw new IllegalArgumentException(
+                            "Duplicate chunk key configuration for table pattern '"
+                                    + pattern
+                                    + "'.");
+                }
+            }
+        }
+        return columns;
     }
 
     private void mergeJdbcPropertiesIntoDebeziumProperties(Map<String, String> configMap) {
@@ -304,6 +358,7 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
         options.add(PORT);
         options.add(TABLES_EXCLUDE);
         options.add(SCAN_INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMN);
+        options.add(CHUNK_KEY_COLUMN_BY_TABLE);
         options.add(SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE);
         options.add(SCAN_SNAPSHOT_FETCH_SIZE);
         options.add(SCHEMA_CHANGE_ENABLED);

@@ -305,7 +305,7 @@ builder.chunkKeyColumns(Map.of(
 
 `ObjectPath` 的完整类名为 `org.apache.flink.table.catalog.ObjectPath`，两个参数分别是已配置数据库内的 SQL Server schema 名和表名，按名称精确匹配。按表配置优先于统一列名，与调用顺序无关。未在 Map 中配置的表使用统一列名，未设置统一列名时使用自身主键的第一列。同一张表出现在多个批量调用中时，以最后一次设置为准。
 
-在 Flink SQL 中，`scan.incremental.snapshot.chunk.key-column` 在每个 Source 表定义中配置单个列名。Pipeline YAML 使用 `scan.incremental.snapshot.chunk.key-column-by-table` 映射按表配置。
+在 Flink SQL 中，`scan.incremental.snapshot.chunk.key-column` 在每个 Source 表定义中配置单个列名。Pipeline YAML 使用 `scan.incremental.snapshot.chunk.key-column-by-table` 按表配置，以 YAML 块字符串（`|`）传入 Map，由 SQL Server 连接器解析。
 
 可用的元数据
 ----------------

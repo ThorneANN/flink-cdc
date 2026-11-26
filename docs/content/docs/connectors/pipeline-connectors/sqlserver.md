@@ -172,7 +172,7 @@ pipeline:
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>Map&lt;String, String&gt;</td>
+      <td>String (YAML map)</td>
       <td>Maps fully qualified table patterns to chunk key columns. A matching entry takes precedence over the source-wide column.</td>
     </tr>
     <tr>
@@ -283,14 +283,14 @@ pipeline:
 
 Use `scan.incremental.snapshot.chunk.key-column` to set the source-wide column. The value is read as a single column name, including any colons or semicolons.
 
-Use the `scan.incremental.snapshot.chunk.key-column-by-table` map for table-specific settings. Each key is a fully qualified table pattern and each value is the original column name.
+Use `scan.incremental.snapshot.chunk.key-column-by-table` for table-specific settings. Pass the map as a YAML block scalar (`|`): the CLI forwards it as a string, and the SQL Server connector parses it. Each key is a fully qualified table pattern and each value is the original column name.
 
 ```yaml
 source:
   type: sqlserver
   tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
   scan.incremental.snapshot.chunk.key-column: id
-  scan.incremental.snapshot.chunk.key-column-by-table:
+  scan.incremental.snapshot.chunk.key-column-by-table: |
     'inventory.dbo.(?:orders|archived_orders)': 'tenant:id'
     inventory.dbo.users: 'tenant;id]'
   # Other connection options are omitted.

@@ -85,8 +85,16 @@ public class SqlServerDataSourceOptions {
                                     + "A non-primary key column can also be used."
                                     + "For tables without primary keys, an explicit non-null column is required.");
 
+    public static final ConfigOption<String> CHUNK_KEY_COLUMN_BY_TABLE =
+            ConfigOptions.key("scan.incremental.snapshot.chunk.key-column-by-table")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "A YAML map encoded as a string, mapping fully qualified table patterns "
+                                    + "to chunk key columns. Table-specific settings override the source-wide column.");
+
     public static final String CHUNK_KEY_COLUMN_BY_TABLE_PREFIX =
-            "scan.incremental.snapshot.chunk.key-column-by-table.";
+            CHUNK_KEY_COLUMN_BY_TABLE.key() + ".";
 
     public static final ConfigOption<Integer> SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE =
             ConfigOptions.key("scan.incremental.snapshot.chunk.size")

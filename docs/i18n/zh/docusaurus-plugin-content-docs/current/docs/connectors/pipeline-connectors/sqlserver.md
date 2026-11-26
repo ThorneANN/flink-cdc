@@ -171,7 +171,7 @@ pipeline:
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>Map&lt;String, String&gt;</td>
+      <td>String（YAML Map）</td>
       <td>把完整的表匹配模式映射到切分键列。匹配的条目优先于统一列名。</td>
     </tr>
     <tr>
@@ -282,14 +282,14 @@ pipeline:
 
 使用 `scan.incremental.snapshot.chunk.key-column` 指定统一列名。配置值整体作为一个列名读取，保留其中的冒号和分号。
 
-使用 `scan.incremental.snapshot.chunk.key-column-by-table` 映射按表指定切分键。每个键是完整的表匹配模式，值是数据库中的原始列名。
+使用 `scan.incremental.snapshot.chunk.key-column-by-table` 按表配置。通过 YAML 块字符串（`|`）传入 Map，CLI 原样传递字符串，由 SQL Server 连接器解析。每个键是完整的表匹配模式，值是数据库中的原始列名。
 
 ```yaml
 source:
   type: sqlserver
   tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
   scan.incremental.snapshot.chunk.key-column: id
-  scan.incremental.snapshot.chunk.key-column-by-table:
+  scan.incremental.snapshot.chunk.key-column-by-table: |
     'inventory.dbo.(?:orders|archived_orders)': 'tenant:id'
     inventory.dbo.users: 'tenant;id]'
   # Other connection options are omitted.
