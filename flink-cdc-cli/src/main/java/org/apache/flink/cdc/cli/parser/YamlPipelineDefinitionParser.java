@@ -78,6 +78,8 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
     // Source / sink keys
     private static final String TYPE_KEY = "type";
     private static final String NAME_KEY = "name";
+    private static final String SQLSERVER_CHUNK_KEY_BY_TABLE =
+            "scan.incremental.snapshot.chunk.key-column-by-table";
     private static final String INCLUDE_SCHEMA_EVOLUTION_TYPES = "include.schema.changes";
     private static final String EXCLUDE_SCHEMA_EVOLUTION_TYPES = "exclude.schema.changes";
     private static final String EXISTING_TABLE_SCHEMA_EXPANSION_MODE =
@@ -212,6 +214,10 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
     }
 
     private SourceDef toSourceDef(JsonNode sourceNode) {
+        if ("sqlserver".equals(sourceNode.path(TYPE_KEY).asText())
+                && sourceNode.has(SQLSERVER_CHUNK_KEY_BY_TABLE)) {
+            flattenSqlServerChunkKeys((ObjectNode) sourceNode);
+        }
         Map<String, String> sourceMap =
                 mapper.convertValue(sourceNode, new TypeReference<Map<String, String>>() {});
 
@@ -226,6 +232,28 @@ public class YamlPipelineDefinitionParser implements PipelineDefinitionParser {
         String name = sourceMap.remove(NAME_KEY);
 
         return new SourceDef(type, name, Configuration.fromMap(sourceMap));
+    }
+
+    private static void flattenSqlServerChunkKeys(ObjectNode sourceNode) {
+        JsonNode chunkKeys = sourceNode.remove(SQLSERVER_CHUNK_KEY_BY_TABLE);
+        Preconditions.checkArgument(
+                chunkKeys.isObject(),
+                "Source option '%s' must be a map from table patterns to column names.",
+                SQLSERVER_CHUNK_KEY_BY_TABLE);
+        chunkKeys
+                .fields()
+                .forEachRemaining(
+                        entry -> {
+                            String key = SQLSERVER_CHUNK_KEY_BY_TABLE + "." + entry.getKey();
+                            Preconditions.checkArgument(
+                                    !sourceNode.has(key), "Duplicate source option '%s'.", key);
+                            Preconditions.checkArgument(
+                                    entry.getValue().isTextual(),
+                                    "Chunk key column for table pattern '%s' in '%s' must be a string.",
+                                    entry.getKey(),
+                                    SQLSERVER_CHUNK_KEY_BY_TABLE);
+                            sourceNode.set(key, entry.getValue());
+                        });
     }
 
     private SinkDef toSinkDef(JsonNode sinkNode, SchemaChangeBehavior schemaChangeBehavior) {

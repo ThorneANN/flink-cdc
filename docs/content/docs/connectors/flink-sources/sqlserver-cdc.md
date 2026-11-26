@@ -291,6 +291,22 @@ Connector Options
 </table>    
 </div>
 
+## Table-specific Chunk Keys in the DataStream API
+
+Use `chunkKeyColumn(String)` to set the source-wide chunk key and `chunkKeyColumns(Map<ObjectPath, String>)` to set table-specific chunk keys in one call.
+
+```java
+SqlServerSourceBuilder<String> builder = new SqlServerSourceBuilder<>();
+builder.chunkKeyColumn("id");
+builder.chunkKeyColumns(Map.of(
+        new ObjectPath("dbo", "orders"), "order_id",
+        new ObjectPath("dbo", "users"), "user_id"));
+```
+
+`ObjectPath` is `org.apache.flink.table.catalog.ObjectPath`. Its two components are the SQL Server schema name and table name within the configured database. Table paths are matched literally. Table-specific configuration takes precedence over the source-wide column regardless of call order. Tables without an explicit chunk key use the source-wide column, or their own first primary key column if no source-wide column is configured. If a table appears in multiple bulk calls, the last setting takes precedence.
+
+For Flink SQL, set `scan.incremental.snapshot.chunk.key-column` to a single column name in each source table definition. Pipeline YAML supports table-specific settings through the `scan.incremental.snapshot.chunk.key-column-by-table` map.
+
 Available Metadata
 ----------------
 

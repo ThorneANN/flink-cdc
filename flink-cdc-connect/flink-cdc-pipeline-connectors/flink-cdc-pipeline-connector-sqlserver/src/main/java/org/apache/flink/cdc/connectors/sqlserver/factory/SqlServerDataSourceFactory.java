@@ -36,6 +36,7 @@ import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceCo
 import org.apache.flink.cdc.connectors.sqlserver.table.SqlServerReadableMetadata;
 import org.apache.flink.cdc.connectors.sqlserver.utils.SqlServerSchemaUtils;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.ObjectPath;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +48,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +57,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.cdc.connectors.base.utils.ObjectUtils.doubleCompare;
+import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMN_BY_TABLE_PREFIX;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_LOWER_BOUND;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_UPPER_BOUND;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_META_GROUP_SIZE;
@@ -96,7 +99,10 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
     @Override
     public DataSource createDataSource(Context context) {
         FactoryHelper.createFactoryHelper(this, context)
-                .validateExcept(PROPERTIES_PREFIX, DEBEZIUM_OPTIONS_PREFIX);
+                .validateExcept(
+                        PROPERTIES_PREFIX,
+                        DEBEZIUM_OPTIONS_PREFIX,
+                        CHUNK_KEY_COLUMN_BY_TABLE_PREFIX);
 
         final Configuration config = context.getFactoryConfiguration();
         String hostname = config.get(HOSTNAME);
@@ -167,9 +173,7 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
                 .assignUnboundedChunkFirst(isAssignUnboundedChunkFirst);
 
         SqlServerSourceConfig sourceConfig = configFactory.create(0);
-        SqlServerSchemaUtils.validateSqlServerAgentRunning(sourceConfig);
-
-        List<TableId> tableIds = SqlServerSchemaUtils.listTables(sourceConfig, null, null);
+        List<TableId> tableIds = discoverTables(sourceConfig);
 
         Selectors selectors = new Selectors.SelectorsBuilder().includeTables(tables).build();
         List<String> capturedTables = getTableList(tableIds, selectors);
@@ -191,11 +195,64 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
             }
         }
         configFactory.tableList(capturedTables.toArray(new String[0]));
+        configureTableChunkKeys(configFactory, configMap, tableIds, new HashSet<>(capturedTables));
 
         String metadataList = config.get(METADATA_LIST);
         List<SqlServerReadableMetadata> readableMetadataList = listReadableMetadata(metadataList);
 
         return new SqlServerDataSource(configFactory, readableMetadataList);
+    }
+
+    List<TableId> discoverTables(SqlServerSourceConfig sourceConfig) {
+        SqlServerSchemaUtils.validateSqlServerAgentRunning(sourceConfig);
+        return SqlServerSchemaUtils.listTables(sourceConfig, null, null);
+    }
+
+    private static void configureTableChunkKeys(
+            SqlServerSourceConfigFactory configFactory,
+            Map<String, String> options,
+            List<TableId> tableIds,
+            Set<String> capturedTables) {
+        Map<ObjectPath, String> chunkKeys = new HashMap<>();
+        for (Map.Entry<String, String> option : options.entrySet()) {
+            String key = option.getKey();
+            if (!key.startsWith(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX)) {
+                continue;
+            }
+
+            String patterns = key.substring(CHUNK_KEY_COLUMN_BY_TABLE_PREFIX.length());
+            String column = option.getValue();
+            String[] tablePatterns = Predicates.RegExSplitterByComma.split(patterns);
+            if (tablePatterns.length == 0
+                    || Arrays.stream(tablePatterns)
+                            .anyMatch(
+                                    pattern ->
+                                            Predicates.RegExSplitterByDot.split(pattern).length
+                                                    != 3)
+                    || StringUtils.isNullOrWhitespaceOnly(column)) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Invalid chunk key option '%s'. Expected fully qualified "
+                                        + "'database.schema.table' patterns and a non-blank column name.",
+                                key));
+            }
+            Selectors selectors = new Selectors.SelectorsBuilder().includeTables(patterns).build();
+            for (TableId tableId : tableIds) {
+                if (!capturedTables.contains(toSchemaTableName(tableId))
+                        || !selectors.isMatch(tableId)) {
+                    continue;
+                }
+                ObjectPath path = new ObjectPath(tableId.getSchemaName(), tableId.getTableName());
+                String previous = chunkKeys.putIfAbsent(path, column);
+                if (previous != null && !previous.equals(column)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Conflicting chunk key columns '%s' and '%s' for table '%s'.",
+                                    previous, column, tableId));
+                }
+            }
+        }
+        chunkKeys.forEach(configFactory::chunkKeyColumn);
     }
 
     private void mergeJdbcPropertiesIntoDebeziumProperties(Map<String, String> configMap) {
@@ -278,11 +335,12 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
                 tableIdList == null ? Collections.emptyList() : tableIdList;
         return resolvedTableIdList.stream()
                 .filter(selectors::isMatch)
-                // SQL Server tableList format: schemaName.tableName (without database prefix)
-                // See SqlServerSourceBuilder: "Each identifier is of the form
-                // <schemaName>.<tableName>"
-                .map(tableId -> tableId.getSchemaName() + "." + tableId.getTableName())
+                .map(SqlServerDataSourceFactory::toSchemaTableName)
                 .collect(Collectors.toList());
+    }
+
+    private static String toSchemaTableName(TableId tableId) {
+        return tableId.getSchemaName() + "." + tableId.getTableName();
     }
 
     /** Checks the value of given integer option is valid. */

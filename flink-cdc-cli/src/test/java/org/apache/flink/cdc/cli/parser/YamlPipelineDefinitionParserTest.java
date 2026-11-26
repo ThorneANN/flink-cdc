@@ -35,6 +35,8 @@ import org.apache.flink.shaded.guava31.com.google.common.collect.ImmutableSet;
 import org.apache.flink.shaded.guava31.com.google.common.io.Resources;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.URL;
 import java.time.Duration;
@@ -58,6 +60,80 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Unit test for {@link org.apache.flink.cdc.cli.parser.YamlPipelineDefinitionParser}. */
 class YamlPipelineDefinitionParserTest {
+
+    private static final String CHUNK_KEY_BY_TABLE =
+            "scan.incremental.snapshot.chunk.key-column-by-table";
+
+    @Test
+    void parsesSqlServerChunkKeysFromYamlMap() throws Exception {
+        SourceDef source =
+                parseSqlServerSource(
+                        "  scan.incremental.snapshot.chunk.key-column: 'default:id;part'\n"
+                                + "  "
+                                + CHUNK_KEY_BY_TABLE
+                                + ":\n"
+                                + "    'inventory.dbo.(?:orders|archived_orders)': 'tenant:id'\n"
+                                + "    inventory.dbo.users: 'tenant;id]'\n"
+                                + "  '"
+                                + CHUNK_KEY_BY_TABLE
+                                + ".inventory.dbo.products': product_id\n");
+
+        assertThat(source.getConfig().toMap())
+                .doesNotContainKey(CHUNK_KEY_BY_TABLE)
+                .containsEntry("scan.incremental.snapshot.chunk.key-column", "default:id;part")
+                .containsEntry(
+                        CHUNK_KEY_BY_TABLE + ".inventory.dbo.(?:orders|archived_orders)",
+                        "tenant:id")
+                .containsEntry(CHUNK_KEY_BY_TABLE + ".inventory.dbo.users", "tenant;id]")
+                .containsEntry(CHUNK_KEY_BY_TABLE + ".inventory.dbo.products", "product_id");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "[id]", "null"})
+    void rejectsNonMapSqlServerChunkKeys(String value) {
+        assertThatThrownBy(
+                        () -> parseSqlServerSource("  " + CHUNK_KEY_BY_TABLE + ": " + value + "\n"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CHUNK_KEY_BY_TABLE)
+                .hasMessageContaining("must be a map");
+    }
+
+    @Test
+    void rejectsNonStringSqlServerChunkKeyColumn() {
+        assertThatThrownBy(
+                        () ->
+                                parseSqlServerSource(
+                                        "  "
+                                                + CHUNK_KEY_BY_TABLE
+                                                + ":\n    inventory.dbo.orders: [id]\n"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("inventory.dbo.orders")
+                .hasMessageContaining("must be a string");
+    }
+
+    @Test
+    void rejectsDuplicateSqlServerChunkKeyInBothForms() {
+        assertThatThrownBy(
+                        () ->
+                                parseSqlServerSource(
+                                        "  "
+                                                + CHUNK_KEY_BY_TABLE
+                                                + ":\n    inventory.dbo.orders: id\n"
+                                                + "  "
+                                                + CHUNK_KEY_BY_TABLE
+                                                + ".inventory.dbo.orders: order_id\n"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate source option")
+                .hasMessageContaining(CHUNK_KEY_BY_TABLE + ".inventory.dbo.orders");
+    }
+
+    private static SourceDef parseSqlServerSource(String options) throws Exception {
+        return new YamlPipelineDefinitionParser()
+                .parse(
+                        "source:\n  type: sqlserver\n" + options + "sink:\n  type: values\n",
+                        new Configuration())
+                .getSource();
+    }
 
     @Test
     void testParsingFullDefinition() throws Exception {

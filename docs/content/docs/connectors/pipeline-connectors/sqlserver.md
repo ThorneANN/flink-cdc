@@ -166,7 +166,14 @@ pipeline:
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>The chunk key of table snapshot. By default, the chunk key is the first column of the primary key. This column must be a primary key column.</td>
+      <td>The source-wide chunk key column. Defaults to each table's first primary key column. A non-primary key column can also be used. Tables without primary keys require an explicit non-null chunk key column.</td>
+    </tr>
+    <tr>
+      <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Map&lt;String, String&gt;</td>
+      <td>Maps fully qualified table patterns to chunk key columns. A matching entry takes precedence over the source-wide column.</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.size</td>
@@ -271,6 +278,29 @@ pipeline:
 </div>
 
 > Compatibility note: To keep the behavior of older Pipeline versions, explicitly configure `scan.incremental.snapshot.backfill.skip: true` and `scan.incremental.snapshot.unbounded-chunk-first.enabled: false`.
+
+## Chunk Key Configuration
+
+Use `scan.incremental.snapshot.chunk.key-column` to set the source-wide column. The value is read as a single column name, including any colons or semicolons.
+
+Use the `scan.incremental.snapshot.chunk.key-column-by-table` map for table-specific settings. Each key is a fully qualified table pattern and each value is the original column name.
+
+```yaml
+source:
+  type: sqlserver
+  tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
+  scan.incremental.snapshot.chunk.key-column: id
+  scan.incremental.snapshot.chunk.key-column-by-table:
+    'inventory.dbo.(?:orders|archived_orders)': 'tenant:id'
+    inventory.dbo.users: 'tenant;id]'
+  # Other connection options are omitted.
+```
+
+Each table uses one chunk key column. Table patterns follow the `tables` option syntax. Overlapping patterns for a captured table must specify the same column. Tables without a matching pattern use the source-wide column if configured, or their own first primary key column.
+
+Non-primary key columns follow the same rules in both configuration forms. See the [non-primary key chunk key considerations](../flink-sources/sqlserver-cdc.md#warning).
+
+The flat form `scan.incremental.snapshot.chunk.key-column-by-table.<table-pattern>` also works. Specify a given pattern only once across the two forms.
 
 ## Available Metadata
 

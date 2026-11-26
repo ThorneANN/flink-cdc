@@ -291,6 +291,22 @@ SELECT * FROM orders;
 </table>    
 </div>
 
+## DataStream API 按表配置切分键
+
+使用 `chunkKeyColumn(String)` 设置统一切分键，使用 `chunkKeyColumns(Map<ObjectPath, String>)` 一次配置多张表的切分键。
+
+```java
+SqlServerSourceBuilder<String> builder = new SqlServerSourceBuilder<>();
+builder.chunkKeyColumn("id");
+builder.chunkKeyColumns(Map.of(
+        new ObjectPath("dbo", "orders"), "order_id",
+        new ObjectPath("dbo", "users"), "user_id"));
+```
+
+`ObjectPath` 的完整类名为 `org.apache.flink.table.catalog.ObjectPath`，两个参数分别是已配置数据库内的 SQL Server schema 名和表名，按名称精确匹配。按表配置优先于统一列名，与调用顺序无关。未在 Map 中配置的表使用统一列名，未设置统一列名时使用自身主键的第一列。同一张表出现在多个批量调用中时，以最后一次设置为准。
+
+在 Flink SQL 中，`scan.incremental.snapshot.chunk.key-column` 在每个 Source 表定义中配置单个列名。Pipeline YAML 使用 `scan.incremental.snapshot.chunk.key-column-by-table` 映射按表配置。
+
 可用的元数据
 ----------------
 

@@ -82,7 +82,11 @@ public class SqlServerDataSourceOptions {
                     .withDescription(
                             "The chunk key of table snapshot, captured tables are split into multiple chunks by a chunk key when read the snapshot of table."
                                     + "By default, the chunk key is the first column of the primary key."
-                                    + "This column must be a column of the primary key.");
+                                    + "A non-primary key column can also be used."
+                                    + "For tables without primary keys, an explicit non-null column is required.");
+
+    public static final String CHUNK_KEY_COLUMN_BY_TABLE_PREFIX =
+            "scan.incremental.snapshot.chunk.key-column-by-table.";
 
     public static final ConfigOption<Integer> SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE =
             ConfigOptions.key("scan.incremental.snapshot.chunk.size")

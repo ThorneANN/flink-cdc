@@ -19,12 +19,19 @@ package org.apache.flink.cdc.connectors.sqlserver.source.config;
 
 import org.apache.flink.cdc.connectors.base.config.JdbcSourceConfig;
 import org.apache.flink.cdc.connectors.base.options.StartupOptions;
+import org.apache.flink.table.catalog.ObjectPath;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.sqlserver.SqlServerConnectorConfig;
+import io.debezium.relational.TableId;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -32,6 +39,8 @@ import java.util.Properties;
  * for performing snapshotting and streaming reading, such as splitSize.
  */
 public class SqlServerSourceConfig extends JdbcSourceConfig {
+
+    private final Map<ObjectPath, String> chunkKeyColumns;
 
     public SqlServerSourceConfig(
             StartupOptions startupOptions,
@@ -56,6 +65,66 @@ public class SqlServerSourceConfig extends JdbcSourceConfig {
             int connectMaxRetries,
             int connectionPoolSize,
             String chunkKeyColumn,
+            boolean skipSnapshotBackfill,
+            boolean scanNewlyAddedTableEnabled,
+            boolean assignUnboundedChunkFirst,
+            boolean releaseSnapshotMetadataEnabled,
+            double scanRateLimitRecordsPerSecond) {
+        this(
+                startupOptions,
+                databaseList,
+                tableList,
+                splitSize,
+                splitMetaGroupSize,
+                distributionFactorUpper,
+                distributionFactorLower,
+                includeSchemaChanges,
+                closeIdleReaders,
+                dbzProperties,
+                dbzConfiguration,
+                driverClassName,
+                hostname,
+                port,
+                username,
+                password,
+                fetchSize,
+                serverTimeZone,
+                connectTimeout,
+                connectMaxRetries,
+                connectionPoolSize,
+                chunkKeyColumn,
+                Collections.emptyMap(),
+                skipSnapshotBackfill,
+                scanNewlyAddedTableEnabled,
+                assignUnboundedChunkFirst,
+                releaseSnapshotMetadataEnabled,
+                scanRateLimitRecordsPerSecond);
+    }
+
+    public SqlServerSourceConfig(
+            StartupOptions startupOptions,
+            List<String> databaseList,
+            List<String> tableList,
+            int splitSize,
+            int splitMetaGroupSize,
+            double distributionFactorUpper,
+            double distributionFactorLower,
+            boolean includeSchemaChanges,
+            boolean closeIdleReaders,
+            Properties dbzProperties,
+            Configuration dbzConfiguration,
+            String driverClassName,
+            String hostname,
+            int port,
+            String username,
+            String password,
+            int fetchSize,
+            String serverTimeZone,
+            Duration connectTimeout,
+            int connectMaxRetries,
+            int connectionPoolSize,
+            String chunkKeyColumn,
+            Map<ObjectPath, String> chunkKeyColumns,
             boolean skipSnapshotBackfill,
             boolean scanNewlyAddedTableEnabled,
             boolean assignUnboundedChunkFirst,
@@ -90,6 +159,17 @@ public class SqlServerSourceConfig extends JdbcSourceConfig {
                 assignUnboundedChunkFirst,
                 releaseSnapshotMetadataEnabled,
                 scanRateLimitRecordsPerSecond);
+        this.chunkKeyColumns = Collections.unmodifiableMap(new HashMap<>(chunkKeyColumns));
+    }
+
+    /** Returns the table-specific chunk key, falling back to the source-wide chunk key. */
+    @Nullable
+    public String getChunkKeyColumn(TableId tableId) {
+        if (chunkKeyColumns.isEmpty()) {
+            return getChunkKeyColumn();
+        }
+        return chunkKeyColumns.getOrDefault(
+                new ObjectPath(tableId.schema(), tableId.table()), getChunkKeyColumn());
     }
 
     @Override

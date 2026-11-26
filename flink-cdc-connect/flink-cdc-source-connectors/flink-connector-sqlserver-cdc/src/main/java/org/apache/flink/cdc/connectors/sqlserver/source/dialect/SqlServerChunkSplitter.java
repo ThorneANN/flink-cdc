@@ -22,13 +22,18 @@ import org.apache.flink.cdc.connectors.base.config.JdbcSourceConfig;
 import org.apache.flink.cdc.connectors.base.dialect.JdbcDataSourceDialect;
 import org.apache.flink.cdc.connectors.base.source.assigner.splitter.JdbcSourceChunkSplitter;
 import org.apache.flink.cdc.connectors.base.source.assigner.state.ChunkSplitterState;
+import org.apache.flink.cdc.connectors.base.source.utils.JdbcChunkUtils;
+import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceConfig;
 import org.apache.flink.cdc.connectors.sqlserver.source.utils.SqlServerTypeUtils;
 import org.apache.flink.cdc.connectors.sqlserver.source.utils.SqlServerUtils;
 import org.apache.flink.table.types.DataType;
 
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.Column;
+import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
+
+import javax.annotation.Nullable;
 
 import java.sql.SQLException;
 
@@ -49,6 +54,33 @@ public class SqlServerChunkSplitter extends JdbcSourceChunkSplitter {
     @Override
     protected DataType fromDbzColumn(Column splitColumn) {
         return SqlServerTypeUtils.fromDbzColumn(splitColumn);
+    }
+
+    @Override
+    protected Column getSplitColumn(Table table, @Nullable String chunkKeyColumn) {
+        String resolvedChunkKey = chunkKeyColumn;
+        if (sourceConfig instanceof SqlServerSourceConfig) {
+            resolvedChunkKey = ((SqlServerSourceConfig) sourceConfig).getChunkKeyColumn(table.id());
+        }
+        return super.getSplitColumn(table, resolvedChunkKey);
+    }
+
+    @Override
+    protected Object[] queryMinMax(JdbcConnection jdbc, TableId tableId, Column splitColumn)
+            throws SQLException {
+        return JdbcChunkUtils.queryMinMax(
+                jdbc, jdbc.quotedTableIdString(tableId), SqlServerUtils.quote(splitColumn.name()));
+    }
+
+    @Override
+    protected Object queryMin(
+            JdbcConnection jdbc, TableId tableId, Column splitColumn, Object excludedLowerBound)
+            throws SQLException {
+        return JdbcChunkUtils.queryMin(
+                jdbc,
+                jdbc.quotedTableIdString(tableId),
+                SqlServerUtils.quote(splitColumn.name()),
+                excludedLowerBound);
     }
 
     @Override

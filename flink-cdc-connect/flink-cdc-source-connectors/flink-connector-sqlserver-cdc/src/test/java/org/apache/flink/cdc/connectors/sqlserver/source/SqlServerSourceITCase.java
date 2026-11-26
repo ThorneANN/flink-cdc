@@ -20,6 +20,7 @@ package org.apache.flink.cdc.connectors.sqlserver.source;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.cdc.connectors.base.config.JdbcSourceConfig;
+import org.apache.flink.cdc.connectors.base.options.StartupOptions;
 import org.apache.flink.cdc.connectors.base.source.utils.hooks.SnapshotPhaseHook;
 import org.apache.flink.cdc.connectors.base.source.utils.hooks.SnapshotPhaseHooks;
 import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceConfig;
@@ -29,6 +30,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.util.RestartStrategyUtils;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.data.RowData;
@@ -41,6 +43,8 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,6 +67,7 @@ import java.util.stream.Collectors;
 import static java.lang.String.format;
 import static org.apache.flink.api.common.JobStatus.RUNNING;
 import static org.apache.flink.table.api.DataTypes.BIGINT;
+import static org.apache.flink.table.api.DataTypes.INT;
 import static org.apache.flink.table.api.DataTypes.STRING;
 import static org.apache.flink.table.catalog.Column.physical;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -88,6 +93,71 @@ class SqlServerSourceITCase extends SqlServerSourceTestBase {
     void testReadSingleTableWithMultipleParallelism() throws Exception {
         testSqlServerParallelSource(
                 4, FailoverType.NONE, FailoverPhase.NEVER, new String[] {"dbo.customers"});
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            value = {
+                "tenant:id|[tenant:id]|false|true",
+                "tenant;id]|[tenant;id]]]|true|true",
+                "tenant:id|[tenant:id]|false|false",
+                "tenant;id]|[tenant;id]]]|true|false"
+            },
+            delimiter = '|')
+    void testSnapshotWithDelimitedChunkKey(
+            String columnName,
+            String quotedColumn,
+            boolean tableSpecificKey,
+            boolean chunkColumnInPrimaryKey)
+            throws Exception {
+        String databaseName = "customer";
+        String tableName = "quoted_chunk_keys";
+        initializeSqlServerTable(databaseName);
+        executeSql(
+                "USE customer; CREATE TABLE dbo.quoted_chunk_keys (id INT NOT NULL, "
+                        + quotedColumn
+                        + " INT NOT NULL, PRIMARY KEY (id"
+                        + (chunkColumnInPrimaryKey ? ", " + quotedColumn : "")
+                        + ")); INSERT INTO dbo.quoted_chunk_keys VALUES (1, 10), (2, 20), (3, 20), (4, 40);"
+                        + " EXEC sys.sp_cdc_enable_table @source_schema = 'dbo', "
+                        + "@source_name = 'quoted_chunk_keys', @role_name = NULL, @supports_net_changes = 0;");
+
+        TestTable table =
+                new TestTable(
+                        databaseName,
+                        "dbo",
+                        tableName,
+                        ResolvedSchema.of(physical("id", INT()), physical(columnName, INT())));
+        SqlServerSourceBuilder<RowData> builder =
+                SqlServerSourceBuilder.SqlServerIncrementalSource.<RowData>builder()
+                        .hostname(MSSQL_SERVER_CONTAINER.getHost())
+                        .port(MSSQL_SERVER_CONTAINER.getMappedPort(MS_SQL_SERVER_PORT))
+                        .username(MSSQL_SERVER_CONTAINER.getUsername())
+                        .password(MSSQL_SERVER_CONTAINER.getPassword())
+                        .databaseList(databaseName)
+                        .tableList("dbo." + tableName)
+                        .splitSize(1)
+                        .distributionFactorUpper(1.0)
+                        .startupOptions(StartupOptions.snapshot())
+                        .deserializer(table.getDeserializer());
+        if (tableSpecificKey) {
+            builder.chunkKeyColumns(Map.of(new ObjectPath("dbo", tableName), columnName));
+        } else {
+            builder.chunkKeyColumn(columnName);
+        }
+
+        List<Integer> keys = new ArrayList<>();
+        try (StreamExecutionEnvironment env =
+                StreamExecutionEnvironment.getExecutionEnvironment()) {
+            env.setParallelism(1);
+            env.enableCheckpointing(200L);
+            RestartStrategyUtils.configureNoRestartStrategy(env);
+            List<RowData> rows =
+                    env.fromSource(builder.build(), WatermarkStrategy.noWatermarks(), "SQL Server")
+                            .executeAndCollect(4);
+            rows.forEach(row -> keys.add(row.getInt(1)));
+        }
+        Assertions.assertThat(keys).containsExactlyInAnyOrder(10, 20, 20, 40);
     }
 
     // Failover tests

@@ -21,10 +21,13 @@ import org.apache.flink.cdc.connectors.base.config.JdbcSourceConfigFactory;
 import org.apache.flink.cdc.connectors.base.options.StartupMode;
 import org.apache.flink.cdc.connectors.base.options.StartupOptions;
 import org.apache.flink.cdc.connectors.base.source.EmbeddedFlinkDatabaseHistory;
+import org.apache.flink.table.catalog.ObjectPath;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.sqlserver.SqlServerConnector;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -36,6 +39,20 @@ public class SqlServerSourceConfigFactory extends JdbcSourceConfigFactory {
 
     private static final String DATABASE_SERVER_NAME = "sqlserver_transaction_log_source";
     private static final String DRIVER_ClASS_NAME = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
+
+    private final Map<ObjectPath, String> chunkKeyColumns = new HashMap<>();
+
+    public SqlServerSourceConfigFactory chunkKeyColumn(
+            ObjectPath tablePath, String chunkKeyColumn) {
+        chunkKeyColumns.put(checkNotNull(tablePath), checkNotNull(chunkKeyColumn));
+        return this;
+    }
+
+    /** Merges table-specific chunk keys, replacing earlier settings for the same tables. */
+    public SqlServerSourceConfigFactory chunkKeyColumns(Map<ObjectPath, String> chunkKeyColumns) {
+        this.chunkKeyColumns.putAll(Map.copyOf(chunkKeyColumns));
+        return this;
+    }
 
     @Override
     public SqlServerSourceConfigFactory startupOptions(StartupOptions startupOptions) {
@@ -127,6 +144,7 @@ public class SqlServerSourceConfigFactory extends JdbcSourceConfigFactory {
                 connectMaxRetries,
                 connectionPoolSize,
                 chunkKeyColumn,
+                chunkKeyColumns,
                 skipSnapshotBackfill,
                 scanNewlyAddedTableEnabled,
                 assignUnboundedChunkFirst,

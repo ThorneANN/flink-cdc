@@ -210,8 +210,16 @@ public class SqlServerSourceFetchTaskContext extends JdbcSourceFetchTaskContext 
 
     @Override
     public RowType getSplitType(Table table) {
-        Column splitColumn = SqlServerUtils.getSplitColumn(table, sourceConfig.getChunkKeyColumn());
+        Column splitColumn =
+                SqlServerUtils.getSplitColumn(
+                        table, getSourceConfig().getChunkKeyColumn(table.id()));
         return SqlServerUtils.getSplitType(splitColumn);
+    }
+
+    @Override
+    public Object[] getSplitKey(SourceRecord record) {
+        RowType splitKeyType = getSplitType(getDatabaseSchema().tableFor(getTableId(record)));
+        return SqlServerUtils.getSplitKey(splitKeyType, record, getSchemaNameAdjuster());
     }
 
     @Override

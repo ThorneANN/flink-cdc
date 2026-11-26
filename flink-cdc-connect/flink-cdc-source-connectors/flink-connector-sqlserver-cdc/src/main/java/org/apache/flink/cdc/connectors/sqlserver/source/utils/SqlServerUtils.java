@@ -18,9 +18,9 @@
 package org.apache.flink.cdc.connectors.sqlserver.source.utils;
 
 import org.apache.flink.cdc.connectors.base.source.meta.offset.Offset;
+import org.apache.flink.cdc.connectors.base.source.utils.JdbcChunkUtils;
 import org.apache.flink.cdc.connectors.base.utils.ObjectUtils;
 import org.apache.flink.cdc.connectors.sqlserver.source.offset.LsnOffset;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.FlinkRuntimeException;
 
@@ -31,12 +31,14 @@ import io.debezium.connector.sqlserver.SqlServerConnectorConfig;
 import io.debezium.connector.sqlserver.SqlServerDatabaseSchema;
 import io.debezium.connector.sqlserver.SqlServerTopicSelector;
 import io.debezium.connector.sqlserver.SqlServerValueConverters;
+import io.debezium.data.Envelope;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.Column;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.schema.TopicSelector;
 import io.debezium.util.SchemaNameAdjuster;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import javax.annotation.Nullable;
@@ -48,12 +50,11 @@ import java.sql.SQLException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
+import static java.util.stream.Collectors.joining;
 import static org.apache.flink.table.api.DataTypes.FIELD;
 import static org.apache.flink.table.api.DataTypes.ROW;
 
@@ -124,39 +125,25 @@ public class SqlServerUtils {
     }
 
     public static Column getSplitColumn(Table table, @Nullable String chunkKeyColumn) {
-        List<Column> primaryKeys = table.primaryKeyColumns();
-        if (primaryKeys.isEmpty()) {
-            throw new ValidationException(
-                    String.format(
-                            "Incremental snapshot for tables requires primary key,"
-                                    + " but table %s doesn't have primary key.",
-                            table.id()));
-        }
-
-        if (chunkKeyColumn != null) {
-            Optional<Column> targetPkColumn =
-                    primaryKeys.stream()
-                            .filter(col -> chunkKeyColumn.equals(col.name()))
-                            .findFirst();
-            if (targetPkColumn.isPresent()) {
-                return targetPkColumn.get();
-            }
-            throw new ValidationException(
-                    String.format(
-                            "Chunk key column '%s' doesn't exist in the primary key [%s] of the table %s.",
-                            chunkKeyColumn,
-                            primaryKeys.stream().map(Column::name).collect(Collectors.joining(",")),
-                            table.id()));
-        }
-
-        // use first field in primary key as the split key
-        return primaryKeys.get(0);
+        return JdbcChunkUtils.getSplitColumn(table, chunkKeyColumn);
     }
 
     public static RowType getSplitType(Column splitColumn) {
         return (RowType)
                 ROW(FIELD(splitColumn.name(), SqlServerTypeUtils.fromDbzColumn(splitColumn)))
                         .getLogicalType();
+    }
+
+    public static Object[] getSplitKey(
+            RowType splitKeyType, SourceRecord record, SchemaNameAdjuster nameAdjuster) {
+        String fieldName = nameAdjuster.adjust(splitKeyType.getFieldNames().get(0));
+        Envelope.Operation operation = Envelope.operationFor(record);
+        Struct value = (Struct) record.value();
+        Struct row =
+                operation == Envelope.Operation.CREATE || operation == Envelope.Operation.READ
+                        ? value.getStruct(Envelope.FieldName.AFTER)
+                        : value.getStruct(Envelope.FieldName.BEFORE);
+        return new Object[] {row.get(fieldName)};
     }
 
     public static Offset getLsn(SourceRecord record) {
@@ -252,7 +239,7 @@ public class SqlServerUtils {
         StringBuilder sql = new StringBuilder();
         for (Iterator<String> fieldNamesIt = pkRowType.getFieldNames().iterator();
                 fieldNamesIt.hasNext(); ) {
-            sql.append(fieldNamesIt.next());
+            sql.append(quote(fieldNamesIt.next()));
             if (fieldNamesIt.hasNext()) {
                 sql.append(" , ");
             }
@@ -301,7 +288,10 @@ public class SqlServerUtils {
             return buildSelectWithRowLimits(
                     tableId, limitSize, "*", Optional.ofNullable(condition), Optional.empty());
         } else {
-            final String orderBy = String.join(", ", pkRowType.getFieldNames());
+            final String orderBy =
+                    pkRowType.getFieldNames().stream()
+                            .map(SqlServerUtils::quote)
+                            .collect(joining(", "));
             return buildSelectWithBoundaryRowLimits(
                     tableId,
                     limitSize,
@@ -325,7 +315,7 @@ public class SqlServerUtils {
         StringBuilder sql = new StringBuilder();
         for (Iterator<String> fieldNamesIt = pkRowType.getFieldNames().iterator();
                 fieldNamesIt.hasNext(); ) {
-            sql.append("MAX(").append(fieldNamesIt.next()).append(")");
+            sql.append("MAX(").append(quote(fieldNamesIt.next())).append(")");
             if (fieldNamesIt.hasNext()) {
                 sql.append(" , ");
             }
@@ -377,7 +367,7 @@ public class SqlServerUtils {
             RowType pkRowType, StringBuilder sql, String predicate) {
         for (Iterator<String> fieldNamesIt = pkRowType.getFieldNames().iterator();
                 fieldNamesIt.hasNext(); ) {
-            sql.append(fieldNamesIt.next()).append(predicate);
+            sql.append(quote(fieldNamesIt.next())).append(predicate);
             if (fieldNamesIt.hasNext()) {
                 sql.append(" AND ");
             }

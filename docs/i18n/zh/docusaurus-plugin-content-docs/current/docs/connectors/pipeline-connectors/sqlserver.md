@@ -165,7 +165,14 @@ pipeline:
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>表快照的切分键。默认使用主键的第一列，该列必须是主键列。</td>
+      <td>表快照的统一切分键列名。默认使用各表自身主键的第一列，也可以指定非主键列。无主键表必须显式配置一个非空列作为切分键。</td>
+    </tr>
+    <tr>
+      <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Map&lt;String, String&gt;</td>
+      <td>把完整的表匹配模式映射到切分键列。匹配的条目优先于统一列名。</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.size</td>
@@ -270,6 +277,29 @@ pipeline:
 </div>
 
 > 兼容性说明：如果希望保持旧版本 Pipeline 行为，可以显式配置 `scan.incremental.snapshot.backfill.skip: true` 和 `scan.incremental.snapshot.unbounded-chunk-first.enabled: false`。
+
+## 切分键配置
+
+使用 `scan.incremental.snapshot.chunk.key-column` 指定统一列名。配置值整体作为一个列名读取，保留其中的冒号和分号。
+
+使用 `scan.incremental.snapshot.chunk.key-column-by-table` 映射按表指定切分键。每个键是完整的表匹配模式，值是数据库中的原始列名。
+
+```yaml
+source:
+  type: sqlserver
+  tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
+  scan.incremental.snapshot.chunk.key-column: id
+  scan.incremental.snapshot.chunk.key-column-by-table:
+    'inventory.dbo.(?:orders|archived_orders)': 'tenant:id'
+    inventory.dbo.users: 'tenant;id]'
+  # Other connection options are omitted.
+```
+
+每张表只使用一个切分键字段。表匹配规则与 `tables` 配置相同。同一张采集表匹配多个模式时，这些模式必须指定同一列。未匹配的表使用统一列名，未配置统一列名时使用自身主键的第一列。
+
+统一列名和按表配置对非主键列采用相同规则，使用时请参阅[非主键切分列的注意事项](../flink-sources/sqlserver-cdc.md#警告)。
+
+原来的平铺键 `scan.incremental.snapshot.chunk.key-column-by-table.<表模式>` 也可以继续使用。同一个模式只需在一种写法中指定一次。
 
 ## 可用 Metadata
 

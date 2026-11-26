@@ -24,8 +24,10 @@ import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceCo
 import org.apache.flink.cdc.connectors.sqlserver.source.dialect.SqlServerDialect;
 import org.apache.flink.cdc.connectors.sqlserver.source.offset.LsnFactory;
 import org.apache.flink.cdc.debezium.DebeziumDeserializationSchema;
+import org.apache.flink.table.catalog.ObjectPath;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Properties;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -176,6 +178,15 @@ public class SqlServerSourceBuilder<T> {
      */
     public SqlServerSourceBuilder<T> chunkKeyColumn(String chunkKeyColumn) {
         this.configFactory.chunkKeyColumn(chunkKeyColumn);
+        return this;
+    }
+
+    /**
+     * Sets the snapshot chunk key columns for multiple tables. Each path contains the schema and
+     * table name. The supplied entries replace any earlier settings for the same tables.
+     */
+    public SqlServerSourceBuilder<T> chunkKeyColumns(Map<ObjectPath, String> chunkKeyColumns) {
+        this.configFactory.chunkKeyColumns(chunkKeyColumns);
         return this;
     }
 
