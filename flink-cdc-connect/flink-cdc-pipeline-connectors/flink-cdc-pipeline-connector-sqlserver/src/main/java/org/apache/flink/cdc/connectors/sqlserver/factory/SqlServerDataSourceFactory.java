@@ -33,6 +33,7 @@ import org.apache.flink.cdc.connectors.base.options.StartupOptions;
 import org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSource;
 import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceConfig;
 import org.apache.flink.cdc.connectors.sqlserver.source.config.SqlServerSourceConfigFactory;
+import org.apache.flink.cdc.connectors.sqlserver.source.utils.SqlServerChunkKeyColumnParser;
 import org.apache.flink.cdc.connectors.sqlserver.table.SqlServerReadableMetadata;
 import org.apache.flink.cdc.connectors.sqlserver.utils.SqlServerSchemaUtils;
 import org.apache.flink.table.api.ValidationException;
@@ -63,6 +64,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.cdc.connectors.base.utils.ObjectUtils.doubleCompare;
+import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMNS;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMN_BY_TABLE;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_COLUMN_BY_TABLE_PREFIX;
 import static org.apache.flink.cdc.connectors.sqlserver.source.SqlServerDataSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_LOWER_BOUND;
@@ -266,6 +268,15 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
 
     private static Map<String, String> tableChunkKeyColumns(Map<String, String> options) {
         Map<String, String> columns = new HashMap<>();
+        String configuredColumns = options.get(CHUNK_KEY_COLUMNS.key());
+        if (configuredColumns != null) {
+            try {
+                columns.putAll(SqlServerChunkKeyColumnParser.parse(configuredColumns));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "Invalid source option '" + CHUNK_KEY_COLUMNS.key() + "'.", e);
+            }
+        }
         String configuredMap = options.get(CHUNK_KEY_COLUMN_BY_TABLE.key());
         if (configuredMap != null) {
             JsonNode mappings;
@@ -291,7 +302,14 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
                                                     + entry.getKey()
                                                     + "' must be a string.");
                                 }
-                                columns.put(entry.getKey(), entry.getValue().textValue());
+                                if (columns.putIfAbsent(
+                                                entry.getKey(), entry.getValue().textValue())
+                                        != null) {
+                                    throw new IllegalArgumentException(
+                                            "Duplicate chunk key configuration for table pattern '"
+                                                    + entry.getKey()
+                                                    + "'.");
+                                }
                             });
         }
         for (Map.Entry<String, String> option : options.entrySet()) {
@@ -358,6 +376,7 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
         options.add(PORT);
         options.add(TABLES_EXCLUDE);
         options.add(SCAN_INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMN);
+        options.add(CHUNK_KEY_COLUMNS);
         options.add(CHUNK_KEY_COLUMN_BY_TABLE);
         options.add(SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE);
         options.add(SCAN_SNAPSHOT_FETCH_SIZE);

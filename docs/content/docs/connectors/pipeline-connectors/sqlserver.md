@@ -169,6 +169,13 @@ pipeline:
       <td>The source-wide chunk key column. Defaults to each table's first primary key column. A non-primary key column can also be used. Tables without primary keys require an explicit non-null chunk key column.</td>
     </tr>
     <tr>
+      <td>scan.incremental.snapshot.chunk.key-columns</td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>Semicolon-separated database.schema.table:column entries, parsed by the Java Source shared parser. Matching entries override the source-wide column.</td>
+    </tr>
+    <tr>
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
@@ -282,6 +289,18 @@ pipeline:
 ## Chunk Key Configuration
 
 Use `scan.incremental.snapshot.chunk.key-column` to set the source-wide column. The value is read as a single column name, including any colons or semicolons.
+
+Use `scan.incremental.snapshot.chunk.key-columns` for the same string syntax as the Java Source. YAML table patterns include the database name. The shared Java parser preserves colons in table regex groups and column names; escape a literal semicolon in a column name as `\;` inside a single-quoted YAML value.
+
+```yaml
+source:
+  type: sqlserver
+  tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
+  scan.incremental.snapshot.chunk.key-column: id
+  scan.incremental.snapshot.chunk.key-columns: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
+```
+
+The previous map and flat forms remain supported.
 
 Use `scan.incremental.snapshot.chunk.key-column-by-table` for table-specific settings. Pass the map as a YAML block scalar (`|`): the CLI forwards it as a string, and the SQL Server connector parses it. Each key is a fully qualified table pattern and each value is the original column name.
 

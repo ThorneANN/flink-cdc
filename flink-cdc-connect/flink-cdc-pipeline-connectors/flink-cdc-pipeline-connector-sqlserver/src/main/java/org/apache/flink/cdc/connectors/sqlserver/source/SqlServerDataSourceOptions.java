@@ -85,6 +85,14 @@ public class SqlServerDataSourceOptions {
                                     + "A non-primary key column can also be used."
                                     + "For tables without primary keys, an explicit non-null column is required.");
 
+    public static final ConfigOption<String> CHUNK_KEY_COLUMNS =
+            ConfigOptions.key("scan.incremental.snapshot.chunk.key-columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Table-specific chunk keys as database.schema.table:column entries "
+                                    + "separated by semicolons. Table patterns follow the tables option syntax.");
+
     public static final ConfigOption<String> CHUNK_KEY_COLUMN_BY_TABLE =
             ConfigOptions.key("scan.incremental.snapshot.chunk.key-column-by-table")
                     .stringType()

@@ -293,19 +293,27 @@ SELECT * FROM orders;
 
 ## DataStream API 按表配置切分键
 
-使用 `chunkKeyColumn(String)` 设置统一切分键，使用 `chunkKeyColumns(Map<ObjectPath, String>)` 一次配置多张表的切分键。
+使用 `chunkKeyColumn(String)` 设置统一切分键，使用 `chunkKeyColumns(String)` 通过一个字符串配置多张表。原有 `chunkKeyColumns(Map<ObjectPath, String>)` 写法继续支持。
 
 ```java
 SqlServerSourceBuilder<String> builder = new SqlServerSourceBuilder<>();
 builder.chunkKeyColumn("id");
+builder.chunkKeyColumns("dbo.orders:order_id;dbo.users:user_id");
+```
+
+也可以继续使用原有 Map 写法：
+
+```java
 builder.chunkKeyColumns(Map.of(
         new ObjectPath("dbo", "orders"), "order_id",
         new ObjectPath("dbo", "users"), "user_id"));
 ```
 
+字符串入口使用 `schema.table:column;schema.table:column`，与 Pipeline 连接器复用同一解析器。Java 中的表路径按名称精确匹配，字符串形式会忽略字段两侧的空白。列名中的冒号原样保留，分号在 Java 字符串中写为 `\\;`。多次调用合并配置，同表以最后一次调用为准；Map 写法继续支持。
+
 `ObjectPath` 的完整类名为 `org.apache.flink.table.catalog.ObjectPath`，两个参数分别是已配置数据库内的 SQL Server schema 名和表名，按名称精确匹配。按表配置优先于统一列名，与调用顺序无关。未在 Map 中配置的表使用统一列名，未设置统一列名时使用自身主键的第一列。同一张表出现在多个批量调用中时，以最后一次设置为准。
 
-在 Flink SQL 中，`scan.incremental.snapshot.chunk.key-column` 在每个 Source 表定义中配置单个列名。Pipeline YAML 使用 `scan.incremental.snapshot.chunk.key-column-by-table` 按表配置，以 YAML 块字符串（`|`）传入 Map，由 SQL Server 连接器解析。
+在 Flink SQL 中，`scan.incremental.snapshot.chunk.key-column` 在每个 Source 表定义中配置单个列名。Pipeline YAML 使用 `scan.incremental.snapshot.chunk.key-columns` 复用字符串配置格式，原有 `scan.incremental.snapshot.chunk.key-column-by-table` Map 继续兼容。
 
 可用的元数据
 ----------------

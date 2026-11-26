@@ -21,6 +21,7 @@ import org.apache.flink.cdc.connectors.base.config.JdbcSourceConfigFactory;
 import org.apache.flink.cdc.connectors.base.options.StartupMode;
 import org.apache.flink.cdc.connectors.base.options.StartupOptions;
 import org.apache.flink.cdc.connectors.base.source.EmbeddedFlinkDatabaseHistory;
+import org.apache.flink.cdc.connectors.sqlserver.source.utils.SqlServerChunkKeyColumnParser;
 import org.apache.flink.table.catalog.ObjectPath;
 
 import io.debezium.config.Configuration;
@@ -52,6 +53,11 @@ public class SqlServerSourceConfigFactory extends JdbcSourceConfigFactory {
     public SqlServerSourceConfigFactory chunkKeyColumns(Map<ObjectPath, String> chunkKeyColumns) {
         this.chunkKeyColumns.putAll(Map.copyOf(chunkKeyColumns));
         return this;
+    }
+
+    /** Merges semicolon-separated {@code schema.table:column} entries. */
+    public SqlServerSourceConfigFactory chunkKeyColumns(String chunkKeyColumns) {
+        return chunkKeyColumns(SqlServerChunkKeyColumnParser.parseObjectPaths(chunkKeyColumns));
     }
 
     @Override

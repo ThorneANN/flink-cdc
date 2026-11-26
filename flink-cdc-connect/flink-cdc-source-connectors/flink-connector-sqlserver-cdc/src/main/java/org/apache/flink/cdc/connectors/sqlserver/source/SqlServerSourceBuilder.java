@@ -190,6 +190,15 @@ public class SqlServerSourceBuilder<T> {
         return this;
     }
 
+    /**
+     * Sets table-specific chunk keys using {@code schema.table:column} entries separated by
+     * semicolons. Escape literal semicolons in column names with a backslash.
+     */
+    public SqlServerSourceBuilder<T> chunkKeyColumns(String chunkKeyColumns) {
+        this.configFactory.chunkKeyColumns(chunkKeyColumns);
+        return this;
+    }
+
     /** The Debezium SqlSever connector properties. For example, "snapshot.mode". */
     public SqlServerSourceBuilder<T> debeziumProperties(Properties properties) {
         this.configFactory.debeziumProperties(properties);

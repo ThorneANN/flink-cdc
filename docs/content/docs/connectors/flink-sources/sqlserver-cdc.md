@@ -293,19 +293,27 @@ Connector Options
 
 ## Table-specific Chunk Keys in the DataStream API
 
-Use `chunkKeyColumn(String)` to set the source-wide chunk key and `chunkKeyColumns(Map<ObjectPath, String>)` to set table-specific chunk keys in one call.
+Use `chunkKeyColumn(String)` to set the source-wide chunk key and `chunkKeyColumns(String)` to configure multiple tables in one string. The `chunkKeyColumns(Map<ObjectPath, String>)` overload remains supported.
 
 ```java
 SqlServerSourceBuilder<String> builder = new SqlServerSourceBuilder<>();
 builder.chunkKeyColumn("id");
+builder.chunkKeyColumns("dbo.orders:order_id;dbo.users:user_id");
+```
+
+The existing Map overload is also available:
+
+```java
 builder.chunkKeyColumns(Map.of(
         new ObjectPath("dbo", "orders"), "order_id",
         new ObjectPath("dbo", "users"), "user_id"));
 ```
 
+The string overload uses semicolon-separated `schema.table:column` entries and shares its parser with the Pipeline connector. Java table paths match names literally; surrounding whitespace is ignored in the string form. Colons in column names are preserved; escape a literal semicolon as `\\;` in a Java string. Repeated calls merge settings, with the last call taking precedence for the same table. The Map overload remains supported.
+
 `ObjectPath` is `org.apache.flink.table.catalog.ObjectPath`. Its two components are the SQL Server schema name and table name within the configured database. Table paths are matched literally. Table-specific configuration takes precedence over the source-wide column regardless of call order. Tables without an explicit chunk key use the source-wide column, or their own first primary key column if no source-wide column is configured. If a table appears in multiple bulk calls, the last setting takes precedence.
 
-For Flink SQL, set `scan.incremental.snapshot.chunk.key-column` to a single column name in each source table definition. Pipeline YAML supports table-specific settings through `scan.incremental.snapshot.chunk.key-column-by-table`, with the map passed as a YAML block scalar (`|`) and parsed by the SQL Server connector.
+For Flink SQL, set `scan.incremental.snapshot.chunk.key-column` to a single column name in each source table definition. Pipeline YAML uses `scan.incremental.snapshot.chunk.key-columns` for the shared string syntax. The previous `scan.incremental.snapshot.chunk.key-column-by-table` map remains supported.
 
 Available Metadata
 ----------------

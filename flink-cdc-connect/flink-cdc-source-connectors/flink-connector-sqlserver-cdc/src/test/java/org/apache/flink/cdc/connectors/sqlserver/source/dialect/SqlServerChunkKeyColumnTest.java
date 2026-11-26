@@ -80,6 +80,77 @@ class SqlServerChunkKeyColumnTest {
         assertChunkKey(sourceConfig, table("dbo", "users", "user_id"), "fallback_id");
     }
 
+    @Test
+    void mergesStringAndMapSettingsAndUsesThemForSplittingAndReading() throws Exception {
+        SqlServerSourceConfigFactory factory = configFactory();
+        factory.chunkKeyColumns(Map.of(new ObjectPath("dbo", "orders"), "fallback_id"));
+        factory.chunkKeyColumns("dbo.orders:order_id;dbo.users:user_id");
+        factory.chunkKeyColumns(Map.of(new ObjectPath("dbo", "users"), "id"));
+        factory.chunkKeyColumn("fallback_id");
+        SqlServerSourceConfig config = factory.create(0);
+
+        assertChunkKey(config, table("dbo", "orders", "order_id"), "order_id");
+        assertChunkKey(config, table("dbo", "users", "user_id"), "id");
+        assertChunkKey(config, table("dbo", "products", "product_id"), "fallback_id");
+    }
+
+    @Test
+    void preservesSourceWideNamesThatLookLikeMappings() throws Exception {
+        String columnName = "dbo.orders:id;dbo.users:user_id";
+        SqlServerSourceConfigFactory factory = configFactory();
+        factory.chunkKeyColumn(columnName);
+
+        assertChunkKey(factory.create(0), table("dbo", "orders", columnName), columnName);
+    }
+
+    @Test
+    void rejectsInvalidStringSettingsWithoutChangingEarlierSettings() {
+        SqlServerSourceConfigFactory factory = configFactory();
+        factory.chunkKeyColumns("dbo.orders:fallback_id");
+
+        assertThatThrownBy(() -> factory.chunkKeyColumns("dbo.orders:order_id;invalid"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> factory.chunkKeyColumns("dbo.orders:order_id;db.dbo.users:id"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(factory.create(0).getChunkKeyColumn(new TableId("inventory", "dbo", "orders")))
+                .isEqualTo("fallback_id");
+    }
+
+    @Test
+    void acceptsStringSettingsThroughTheSourceBuilder() {
+        SqlServerSourceBuilder<String> builder =
+                SqlServerSourceBuilder.SqlServerIncrementalSource.<String>builder()
+                        .hostname("localhost")
+                        .databaseList("inventory")
+                        .tableList("dbo.orders", "dbo.users", "dbo.products")
+                        .username("user")
+                        .password("password")
+                        .deserializer(new JsonDebeziumDeserializationSchema())
+                        .chunkKeyColumns("dbo.orders:order_id;dbo.users:user_id")
+                        .chunkKeyColumns(Map.of(new ObjectPath("dbo", "users"), "id"))
+                        .chunkKeyColumn("fallback_id");
+
+        assertThat(builder.build())
+                .extracting("configFactory")
+                .isInstanceOfSatisfying(
+                        SqlServerSourceConfigFactory.class,
+                        factory -> {
+                            SqlServerSourceConfig config = factory.create(2);
+                            assertThat(
+                                            config.getChunkKeyColumn(
+                                                    new TableId("inventory", "dbo", "orders")))
+                                    .isEqualTo("order_id");
+                            assertThat(
+                                            config.getChunkKeyColumn(
+                                                    new TableId("inventory", "dbo", "users")))
+                                    .isEqualTo("id");
+                            assertThat(
+                                            config.getChunkKeyColumn(
+                                                    new TableId("inventory", "dbo", "products")))
+                                    .isEqualTo("fallback_id");
+                        });
+    }
+
     @ParameterizedTest
     @CsvSource({"true, false", "true, true", "false, false", "false, true"})
     void usesNonPrimaryKeyForSplittingAndReading(boolean hasPrimaryKey, boolean tableSpecificKey)

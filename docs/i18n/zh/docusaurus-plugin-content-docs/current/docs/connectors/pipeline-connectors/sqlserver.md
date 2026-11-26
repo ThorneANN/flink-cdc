@@ -168,6 +168,13 @@ pipeline:
       <td>表快照的统一切分键列名。默认使用各表自身主键的第一列，也可以指定非主键列。无主键表必须显式配置一个非空列作为切分键。</td>
     </tr>
     <tr>
+      <td>scan.incremental.snapshot.chunk.key-columns</td>
+      <td>optional</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>使用分号分隔 database.schema.table:column，由 Java Source 的共享解析器处理，匹配结果优先于统一列名。</td>
+    </tr>
+    <tr>
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
@@ -281,6 +288,18 @@ pipeline:
 ## 切分键配置
 
 使用 `scan.incremental.snapshot.chunk.key-column` 指定统一列名。配置值整体作为一个列名读取，保留其中的冒号和分号。
+
+使用 `scan.incremental.snapshot.chunk.key-columns`，采用与 Java Source 相同的字符串格式；YAML 表模式包含数据库名。两者复用 Java 解析器，保留正则分组和列名中的冒号。列名中的分号在 YAML 单引号字符串中写为 `\;`。
+
+```yaml
+source:
+  type: sqlserver
+  tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
+  scan.incremental.snapshot.chunk.key-column: id
+  scan.incremental.snapshot.chunk.key-columns: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
+```
+
+原有 Map 和平铺键写法继续兼容。
 
 使用 `scan.incremental.snapshot.chunk.key-column-by-table` 按表配置。通过 YAML 块字符串（`|`）传入 Map，CLI 原样传递字符串，由 SQL Server 连接器解析。每个键是完整的表匹配模式，值是数据库中的原始列名。
 
