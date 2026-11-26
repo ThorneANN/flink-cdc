@@ -95,6 +95,16 @@ class SqlServerChunkKeyColumnTest {
     }
 
     @Test
+    void usesLiteralJavaTableNamesForSplittingAndReading() throws Exception {
+        SqlServerSourceConfigFactory factory = configFactory();
+        factory.chunkKeyColumns("dbo.orders(2026:order_id;dbo.orders[archive:user_id");
+        SqlServerSourceConfig config = factory.create(0);
+
+        assertChunkKey(config, table("dbo", "orders(2026", "order_id"), "order_id");
+        assertChunkKey(config, table("dbo", "orders[archive", "user_id"), "user_id");
+    }
+
+    @Test
     void preservesSourceWideNamesThatLookLikeMappings() throws Exception {
         String columnName = "dbo.orders:id;dbo.users:user_id";
         SqlServerSourceConfigFactory factory = configFactory();

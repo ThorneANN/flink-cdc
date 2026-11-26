@@ -95,6 +95,34 @@ class SqlServerChunkKeyColumnOptionTest {
     }
 
     @Test
+    void preservesRegexCommentsInYamlStrings() throws Exception {
+        SqlServerSourceConfig config =
+                configureYaml(
+                        CHUNK_KEY_COLUMNS
+                                + ": \"inventory.dbo.(?x)orders # note:ignored\\n:id;inventory.dbo.users:tenant:id\\\\;part]\"\n"
+                                + CHUNK_KEY_COLUMN
+                                + ": fallback_id\n");
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("id");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(config, "dbo", "products")).isEqualTo("fallback_id");
+    }
+
+    @Test
+    void restoresRegexFlagsAfterScopedCommentsMode() {
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(
+                                CHUNK_KEY_COLUMNS,
+                                "inventory.dbo.(?x:orders)#:order_id;inventory.dbo.users:user_id",
+                                CHUNK_KEY_COLUMN,
+                                "fallback_id"));
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("fallback_id");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("user_id");
+    }
+
+    @Test
     void combinesStringMapAndFlatOptionsForDifferentTables() {
         SqlServerSourceConfig config =
                 configure(

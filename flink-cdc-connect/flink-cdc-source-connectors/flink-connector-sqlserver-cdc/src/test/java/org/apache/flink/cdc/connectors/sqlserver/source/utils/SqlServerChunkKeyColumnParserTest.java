@@ -24,6 +24,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -58,6 +59,94 @@ class SqlServerChunkKeyColumnParserTest {
                                 pattern + ":tenant:id;inventory.dbo.other:id"))
                 .containsExactlyInAnyOrderEntriesOf(
                         Map.of(pattern, "tenant:id", "inventory.dbo.other", "id"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "inventory.dbo.(?x)orders # note:ignored\n",
+                "inventory.dbo.(?x:orders # note:;[) ignored\n)",
+                "inventory.dbo.((?x)orders # note:ignored\n)",
+                "inventory.dbo.(?x)(?-x:orders#archive) # note:ignored\n",
+                "inventory.dbo.(?imx)orders # note:ignored\r\n",
+                "inventory.dbo.(?dx)orders # note\r:ignored\n",
+                "inventory.dbo.(?x # flags:;[) ignored\n:orders)",
+                "inventory.dbo.(?x)[ # comment:;)] ignored\n:a]"
+            })
+    void ignoresDelimitersAndBracketsInExtendedModeComments(String pattern) {
+        Pattern.compile(pattern);
+
+        assertThat(
+                        SqlServerChunkKeyColumnParser.parse(
+                                pattern + ":tenant:id\\;part];inventory.dbo.users:user_id"))
+                .containsExactlyInAnyOrderEntriesOf(
+                        Map.of(
+                                pattern.trim(),
+                                "tenant:id;part]",
+                                "inventory.dbo.users",
+                                "user_id"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "inventory.dbo.(?x:orders)#archive",
+                "inventory.dbo.(?x)(?-x)orders#archive",
+                "inventory.dbo.(?x)orders\\#archive",
+                "inventory.dbo.(?x)\\Qorders#archive:part;1\\E",
+                "(?x)inventory.dbo.orders#archive",
+                "inventory.(?x)dbo.orders#archive",
+                "inventory.dbo.[\\Q\\E]:a]"
+            })
+    void preservesLiteralHashesWhenCommentsAreDisabledOrEscaped(String pattern) {
+        Pattern.compile(pattern);
+
+        assertThat(SqlServerChunkKeyColumnParser.parse(pattern + ":id"))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(pattern, "id"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029"})
+    void endsExtendedModeCommentsAtRegexLineSeparators(String lineSeparator) {
+        String pattern = "inventory.dbo.(?x)orders # note:ignored" + lineSeparator;
+
+        assertThat(SqlServerChunkKeyColumnParser.parse(pattern + ":id"))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(pattern.trim(), "id"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "orders(2026",
+                "orders[archive",
+                "orders)2026",
+                "orders]archive",
+                "orders\\Qarchive",
+                "orders(?x)#archive"
+            })
+    void treatsJavaTableNamesAsLiterals(String tableName) {
+        assertThat(SqlServerChunkKeyColumnParser.parseObjectPaths("dbo." + tableName + ":id"))
+                .containsExactlyInAnyOrderEntriesOf(Map.of(new ObjectPath("dbo", tableName), "id"));
+    }
+
+    @Test
+    void treatsJavaSchemaNamesAsLiterals() {
+        assertThat(
+                        SqlServerChunkKeyColumnParser.parseObjectPaths(
+                                "sales(2026.orders:id;sales[archive.users:user_id"))
+                .containsExactlyInAnyOrderEntriesOf(
+                        Map.of(
+                                new ObjectPath("sales(2026", "orders"), "id",
+                                new ObjectPath("sales[archive", "users"), "user_id"));
+    }
+
+    @Test
+    void appliesCommentsModeOnlyToTablePatterns() {
+        assertThat(
+                        SqlServerChunkKeyColumnParser.parse(
+                                "inventory.dbo.(?x)orders:#tenant:id\\;part]"))
+                .containsExactlyInAnyOrderEntriesOf(
+                        Map.of("inventory.dbo.(?x)orders", "#tenant:id;part]"));
     }
 
     @Test

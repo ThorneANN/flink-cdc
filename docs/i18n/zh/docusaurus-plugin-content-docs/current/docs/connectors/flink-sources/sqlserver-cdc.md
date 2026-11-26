@@ -492,8 +492,10 @@ public class SqlServerIncrementalSourceExample {
 
 1. 配置 `scan.incremental.snapshot.chunk.key-column` 时，如果表中存在索引，请尽量使用索引中的列来加快 select 速度。
 2. 无主键表的处理语义由 `scan.incremental.snapshot.chunk.key-column` 指定的列的行为决定：
-* 如果指定的列不存在更新操作，此时可以保证 Exactly once 语义。
+* 保持指定列不变可以避免记录在快照分片之间移动。分片列不要求唯一，也不会代替主键；快照会保留重复行。
 * 如果指定的列存在更新操作，此时只能保证 At least once 语义。但可以结合下游，通过指定下游主键，结合幂等性操作来保证数据的正确性。
+
+SQL Server CDC 捕获作业可能落后于已提交的表写入。对于没有消息键的表，快照中已经可见的 INSERT 也可能在捕获作业追平后通过变更日志再次输出，即使分片列没有更新也会发生，因此这种情况下不能假定 Exactly once。如果表有真正唯一的业务键，可以通过 `debezium.message.key.columns` 配置消息键，或在下游按该业务键进行幂等写入。非唯一的分片列不能用于代替业务键。
 
 #### 警告
 

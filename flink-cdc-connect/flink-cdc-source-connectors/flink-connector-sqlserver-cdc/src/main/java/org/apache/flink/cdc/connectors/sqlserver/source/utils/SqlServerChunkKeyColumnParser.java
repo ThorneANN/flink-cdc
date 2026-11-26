@@ -24,6 +24,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -34,18 +35,38 @@ public final class SqlServerChunkKeyColumnParser {
 
     private SqlServerChunkKeyColumnParser() {}
 
+    /** Parses mappings whose table keys follow the Pipeline regular-expression syntax. */
     public static Map<String, String> parse(String value) {
+        return parse(value, true);
+    }
+
+    private static Map<String, String> parse(String value, boolean regularExpressions) {
         checkNotNull(value, "Table chunk keys must not be null.");
         Map<String, String> columns = new HashMap<>();
         StringBuilder table = new StringBuilder();
         StringBuilder column = new StringBuilder();
         boolean readingColumn = false;
-        int groupDepth = 0;
-        Deque<Integer> characterClasses = new ArrayDeque<>();
-        boolean quotedPattern = false;
+        RegexContext regex = regularExpressions ? new RegexContext() : null;
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);
             StringBuilder target = readingColumn ? column : table;
+            if (!readingColumn && regex != null && regex.comment) {
+                table.append(current);
+                regex.acceptComment(current);
+                continue;
+            }
+            if (!readingColumn && regex != null && regex.quoted) {
+                table.append(current);
+                if (current == '\\'
+                        && index + 1 < value.length()
+                        && value.charAt(index + 1) == 'E') {
+                    table.append(value.charAt(++index));
+                    regex.quoted = false;
+                } else {
+                    regex.acceptLiteral();
+                }
+                continue;
+            }
             if (current == '\\') {
                 checkArgument(index + 1 < value.length(), "Unterminated chunk key escape.");
                 char escaped = value.charAt(++index);
@@ -53,47 +74,32 @@ public final class SqlServerChunkKeyColumnParser {
                     target.append('\\');
                 }
                 target.append(escaped);
-                if (!readingColumn && escaped == 'Q' && !quotedPattern) {
-                    quotedPattern = true;
-                } else if (!readingColumn && escaped == 'E' && quotedPattern) {
-                    quotedPattern = false;
+                if (!readingColumn && regex != null) {
+                    if (escaped == 'Q') {
+                        regex.quoted = true;
+                    } else {
+                        regex.acceptLiteral();
+                    }
                 }
-            } else if (current == ';'
-                    && (readingColumn
-                            || (groupDepth == 0 && characterClasses.isEmpty() && !quotedPattern))) {
+            } else if (current == ';' && (readingColumn || regex == null || regex.atBoundary())) {
                 addMapping(columns, table, column, readingColumn);
                 table.setLength(0);
                 column.setLength(0);
                 readingColumn = false;
-            } else if (current == ':'
-                    && !readingColumn
-                    && groupDepth == 0
-                    && characterClasses.isEmpty()
-                    && !quotedPattern) {
-                readingColumn = true;
-            } else {
-                if (!readingColumn && !quotedPattern) {
-                    if (current == '[') {
-                        characterClasses.push(index);
-                    } else if (current == ']' && !characterClasses.isEmpty()) {
-                        int start = characterClasses.peek();
-                        if (index != start + 1
-                                && !(index == start + 2 && value.charAt(start + 1) == '^')) {
-                            characterClasses.pop();
-                        }
-                    } else if (characterClasses.isEmpty() && current == '(') {
-                        groupDepth++;
-                    } else if (characterClasses.isEmpty() && current == ')') {
-                        checkArgument(groupDepth > 0, "Unbalanced table pattern parentheses.");
-                        groupDepth--;
-                    }
+                if (regex != null) {
+                    regex.reset();
                 }
+            } else if (current == ':' && !readingColumn && (regex == null || regex.atBoundary())) {
+                readingColumn = true;
+            } else if (!readingColumn && regex != null) {
+                int last = regex.accept(value, index);
+                table.append(value, index, last + 1);
+                index = last;
+            } else {
                 target.append(current);
             }
         }
-        checkArgument(
-                groupDepth == 0 && characterClasses.isEmpty() && !quotedPattern,
-                "Unbalanced table pattern.");
+        checkArgument(regex == null || regex.balanced(), "Unbalanced table pattern.");
         if (readingColumn || !table.toString().trim().isEmpty()) {
             addMapping(columns, table, column, readingColumn);
         }
@@ -101,9 +107,10 @@ public final class SqlServerChunkKeyColumnParser {
         return columns;
     }
 
+    /** Parses mappings with literal schema and table names for the Java Source. */
     public static Map<ObjectPath, String> parseObjectPaths(String value) {
         Map<ObjectPath, String> columns = new HashMap<>();
-        for (Map.Entry<String, String> entry : parse(value).entrySet()) {
+        for (Map.Entry<String, String> entry : parse(value, false).entrySet()) {
             String name = entry.getKey();
             int separator = -1;
             for (int index = 0; index < name.length(); index++) {
@@ -158,5 +165,150 @@ public final class SqlServerChunkKeyColumnParser {
             result.append(current);
         }
         return result.toString();
+    }
+
+    private static final class RegexContext {
+        private final Deque<Integer> groups = new ArrayDeque<>();
+        private final Deque<CharacterClass> characterClasses = new ArrayDeque<>();
+        private int flags;
+        private boolean comment;
+        private boolean quoted;
+
+        private boolean atBoundary() {
+            return groups.isEmpty() && characterClasses.isEmpty() && !comment && !quoted;
+        }
+
+        private boolean balanced() {
+            return groups.isEmpty() && characterClasses.isEmpty() && !quoted;
+        }
+
+        private void reset() {
+            groups.clear();
+            characterClasses.clear();
+            flags = 0;
+            comment = false;
+            quoted = false;
+        }
+
+        private void acceptComment(char current) {
+            if (isLineSeparator(current, flags)) {
+                comment = false;
+                if (!isWhitespace(current)) {
+                    acceptLiteral();
+                }
+            }
+        }
+
+        private void acceptLiteral() {
+            if (!characterClasses.isEmpty()) {
+                characterClasses.peek().canClose = true;
+            }
+        }
+
+        private int accept(String value, int index) {
+            char current = value.charAt(index);
+            if ((flags & Pattern.COMMENTS) != 0) {
+                if (current == '#') {
+                    comment = true;
+                    return index;
+                }
+                if (isWhitespace(current)) {
+                    return index;
+                }
+            }
+            if (current == '[') {
+                acceptLiteral();
+                characterClasses.push(new CharacterClass());
+            } else if (!characterClasses.isEmpty()) {
+                CharacterClass characterClass = characterClasses.peek();
+                if (current == ']' && characterClass.canClose) {
+                    characterClasses.pop();
+                } else if (current == '^' && !characterClass.canClose && !characterClass.negated) {
+                    characterClass.negated = true;
+                } else {
+                    acceptLiteral();
+                }
+            } else if (current == '(') {
+                int last = acceptFlags(value, index);
+                if (last != index) {
+                    return last;
+                }
+                groups.push(flags);
+            } else if (current == ')') {
+                checkArgument(!groups.isEmpty(), "Unbalanced table pattern parentheses.");
+                flags = groups.pop();
+            } else if (current == '.' && groups.isEmpty()) {
+                // Each namespace/schema/table component is compiled as a separate regex.
+                flags = 0;
+            }
+            return index;
+        }
+
+        private int acceptFlags(String value, int index) {
+            if (index + 1 >= value.length() || value.charAt(index + 1) != '?') {
+                return index;
+            }
+            int updatedFlags = flags;
+            boolean subtract = false;
+            boolean foundFlag = false;
+            int cursor = index + 2;
+            while (cursor < value.length()) {
+                char current = value.charAt(cursor);
+                if ((updatedFlags & Pattern.COMMENTS) != 0) {
+                    if (isWhitespace(current)) {
+                        cursor++;
+                        continue;
+                    }
+                    if (current == '#') {
+                        cursor++;
+                        while (cursor < value.length()
+                                && !isLineSeparator(value.charAt(cursor), updatedFlags)) {
+                            cursor++;
+                        }
+                        continue;
+                    }
+                }
+                if (current == '-' && !subtract) {
+                    subtract = true;
+                } else if ("idmsucxU".indexOf(current) >= 0) {
+                    foundFlag = true;
+                    int flag = 0;
+                    if (current == 'x') {
+                        flag = Pattern.COMMENTS;
+                    } else if (current == 'd') {
+                        flag = Pattern.UNIX_LINES;
+                    }
+                    updatedFlags = subtract ? updatedFlags & ~flag : updatedFlags | flag;
+                } else if (foundFlag && (current == ':' || current == ')')) {
+                    if (current == ':') {
+                        groups.push(flags);
+                    }
+                    flags = updatedFlags;
+                    return cursor;
+                } else {
+                    return index;
+                }
+                cursor++;
+            }
+            return index;
+        }
+
+        private static boolean isWhitespace(char value) {
+            return value == ' ' || (value >= '\t' && value <= '\r');
+        }
+
+        private static boolean isLineSeparator(char value, int flags) {
+            return value == '\n'
+                    || ((flags & Pattern.UNIX_LINES) == 0
+                            && (value == '\r'
+                                    || value == '\u0085'
+                                    || value == '\u2028'
+                                    || value == '\u2029'));
+        }
+    }
+
+    private static final class CharacterClass {
+        private boolean canClose;
+        private boolean negated;
     }
 }

@@ -492,8 +492,10 @@ There are two places that need to be taken care of.
 
 1. If there is an index in the table, try to use a column which is contained in the index in `scan.incremental.snapshot.chunk.key-column`. This will increase the speed of select statement.
 2. The processing semantics of a SQL Server CDC table without a primary key are determined by the behavior of the column specified by `scan.incremental.snapshot.chunk.key-column`.
-* If no update operation is performed on the specified column, the exactly-once semantics is ensured.
+* Keeping the specified column unchanged avoids moving rows between snapshot splits. The chunk key does not need to be unique and is not used as a substitute for a primary key; snapshots retain duplicate rows.
 * If the update operation is performed on the specified column, only the at-least-once semantics is ensured. However, you can specify primary keys at downstream and perform the idempotence operation to ensure data correctness.
+
+SQL Server CDC capture can lag behind committed table writes. For tables without a message key, inserts already visible in a snapshot can also be replayed through the change log while the capture job catches up, even if the chunk key is unchanged. Do not assume exactly-once delivery in this case. If the table has a genuinely unique business key, configure it through `debezium.message.key.columns`, or use that key for idempotent writes downstream. A non-unique chunk column cannot serve this purpose.
 
 #### Warning
 

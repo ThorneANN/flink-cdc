@@ -26,6 +26,7 @@ import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.shaded.guava31.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import io.debezium.connector.base.ChangeEventQueue;
+import io.debezium.data.Envelope;
 import io.debezium.pipeline.DataChangeEvent;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -34,7 +35,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -152,6 +155,7 @@ public class IncrementalSourceScanFetcher implements Fetcher<SourceRecords, Sour
         SourceRecord lowWatermark = null;
         SourceRecord highWatermark = null;
         Map<Struct, SourceRecord> outputBuffer = new HashMap<>();
+        Map<Struct, List<SourceRecord>> keylessRecords = new HashMap<>();
         while (!reachChangeLogEnd) {
             checkReadException();
             List<DataChangeEvent> batch = queue.poll();
@@ -177,9 +181,15 @@ public class IncrementalSourceScanFetcher implements Fetcher<SourceRecords, Sour
                 }
 
                 if (!reachChangeLogStart) {
-                    outputBuffer.put((Struct) record.key(), record);
-                } else {
-                    if (isChangeRecordInChunkRange(record)) {
+                    if (record.key() != null) {
+                        outputBuffer.put((Struct) record.key(), record);
+                    } else {
+                        addKeylessRecord(keylessRecords, record);
+                    }
+                } else if (taskContext.isDataChangeRecord(record)) {
+                    if (record.key() == null) {
+                        rewriteKeylessRecords(keylessRecords, record);
+                    } else if (isChangeRecordInChunkRange(record)) {
                         // rewrite overlapping snapshot records through the record key
                         taskContext.rewriteOutputBuffer(outputBuffer, record);
                     }
@@ -191,12 +201,74 @@ public class IncrementalSourceScanFetcher implements Fetcher<SourceRecords, Sour
 
         final List<SourceRecord> normalizedRecords = new ArrayList<>();
         normalizedRecords.add(lowWatermark);
-        normalizedRecords.addAll(taskContext.formatMessageTimestamp(outputBuffer.values()));
+        Collection<SourceRecord> snapshotRecords = outputBuffer.values();
+        if (!keylessRecords.isEmpty()) {
+            snapshotRecords = new ArrayList<>(snapshotRecords);
+            for (List<SourceRecord> records : keylessRecords.values()) {
+                snapshotRecords.addAll(records);
+            }
+        }
+        normalizedRecords.addAll(taskContext.formatMessageTimestamp(snapshotRecords));
         normalizedRecords.add(highWatermark);
 
         final List<SourceRecords> sourceRecordsSet = new ArrayList<>();
         sourceRecordsSet.add(new SourceRecords(normalizedRecords));
         return sourceRecordsSet.iterator();
+    }
+
+    private static void addKeylessRecord(
+            Map<Struct, List<SourceRecord>> records, SourceRecord record) {
+        Struct row = ((Struct) record.value()).getStruct(Envelope.FieldName.AFTER);
+        // Keep a multiset: identical rows are distinct records in tables without a key.
+        records.computeIfAbsent(row, ignored -> new ArrayList<>()).add(record);
+    }
+
+    private void rewriteKeylessRecords(
+            Map<Struct, List<SourceRecord>> records, SourceRecord record) {
+        Struct value = (Struct) record.value();
+        Envelope.Operation operation = Envelope.operationFor(record);
+        if (operation == Envelope.Operation.UPDATE || operation == Envelope.Operation.DELETE) {
+            Struct before = value.getStruct(Envelope.FieldName.BEFORE);
+            if (isRowInChunkRange(record, before)) {
+                List<SourceRecord> copies = records.get(before);
+                if (copies != null && !copies.isEmpty()) {
+                    copies.remove(copies.size() - 1);
+                    if (copies.isEmpty()) {
+                        records.remove(before);
+                    }
+                }
+            }
+        }
+        if (operation == Envelope.Operation.CREATE || operation == Envelope.Operation.UPDATE) {
+            if (isRowInChunkRange(record, value.getStruct(Envelope.FieldName.AFTER))) {
+                addKeylessRecord(records, record);
+            }
+        } else if (operation != Envelope.Operation.DELETE) {
+            throw new IllegalStateException("Unexpected snapshot backfill operation: " + operation);
+        }
+    }
+
+    private boolean isRowInChunkRange(SourceRecord record, Struct row) {
+        checkState(
+                row != null, "Snapshot backfill requires a complete row image for keyless tables.");
+        Struct value = (Struct) record.value();
+        Struct readValue =
+                Envelope.fromSchema(record.valueSchema())
+                        .read(row, value.getStruct(Envelope.FieldName.SOURCE), Instant.EPOCH);
+        SourceRecord readRecord =
+                record.newRecord(
+                        record.topic(),
+                        record.kafkaPartition(),
+                        record.keySchema(),
+                        record.key(),
+                        record.valueSchema(),
+                        readValue,
+                        record.timestamp(),
+                        record.headers());
+        return taskContext.isRecordBetween(
+                readRecord,
+                currentSnapshotSplit.getSplitStart(),
+                currentSnapshotSplit.getSplitEnd());
     }
 
     private void checkReadException() {
