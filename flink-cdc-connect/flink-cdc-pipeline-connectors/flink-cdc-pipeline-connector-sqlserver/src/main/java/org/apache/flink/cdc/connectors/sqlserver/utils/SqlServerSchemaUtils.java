@@ -37,7 +37,9 @@ import javax.annotation.Nullable;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Utilities for converting from debezium {@link Table} types to {@link Schema}. */
@@ -118,6 +120,35 @@ public class SqlServerSchemaUtils {
             return getTableSchema(tableId, (SqlServerConnection) jdbc, dialect);
         } catch (SQLException e) {
             throw new RuntimeException("Error to get table schema: " + e.getMessage(), e);
+        }
+    }
+
+    /** Checks an ambiguous chunk-key value against physical columns in the captured tables. */
+    public static boolean hasColumn(
+            SqlServerSourceConfig sourceConfig, List<TableId> tableIds, String columnName) {
+        String database = sourceConfig.getDatabaseList().get(0);
+        Set<TableId> capturedTables = new HashSet<>(tableIds);
+        String query =
+                "SELECT TABLE_CATALOG, TABLE_SCHEMA, TABLE_NAME FROM "
+                        + quote(database)
+                        + ".INFORMATION_SCHEMA.COLUMNS WHERE COLUMN_NAME = ?";
+        try (JdbcConnection jdbc =
+                getSqlServerDialect(sourceConfig).openJdbcConnection(sourceConfig)) {
+            return jdbc.prepareQueryAndMap(
+                    query,
+                    statement -> statement.setString(1, columnName),
+                    rs -> {
+                        while (rs.next()) {
+                            if (capturedTables.contains(
+                                    TableId.tableId(
+                                            rs.getString(1), rs.getString(2), rs.getString(3)))) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    });
+        } catch (SQLException e) {
+            throw new ValidationException("Failed to resolve the SQL Server chunk key column.", e);
         }
     }
 

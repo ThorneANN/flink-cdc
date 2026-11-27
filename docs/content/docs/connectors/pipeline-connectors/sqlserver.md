@@ -166,14 +166,14 @@ pipeline:
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>The source-wide chunk key column. Defaults to each table's first primary key column. A non-primary key column can also be used. Tables without primary keys require an explicit non-null chunk key column.</td>
+      <td>A source-wide chunk key column or semicolon-separated database.schema.table:column mappings. Unmapped tables default to their first primary key column. A non-primary key column can also be used. Tables without primary keys require an explicit non-null chunk key column.</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.key-columns</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>Semicolon-separated database.schema.table:column entries, parsed by the Java Source shared parser. Matching entries override the source-wide column.</td>
+      <td>Compatibility option for semicolon-separated database.schema.table:column entries. Prefer scan.incremental.snapshot.chunk.key-column for new configurations. Matching entries override the source-wide column.</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
@@ -288,17 +288,27 @@ pipeline:
 
 ## Chunk Key Configuration
 
-Use `scan.incremental.snapshot.chunk.key-column` to set the source-wide column. The value is read as a single column name, including any colons or semicolons.
+Use `scan.incremental.snapshot.chunk.key-column` for either a source-wide column name or multiple table-to-column mappings:
 
-Use `scan.incremental.snapshot.chunk.key-columns` for the same string syntax as the Java Source. YAML table patterns include the database name. The shared Java parser preserves colons in table regex groups and column names; escape a literal semicolon in a column name as `\;` inside a single-quoted YAML value.
+```yaml
+# Use the same column for every table.
+scan.incremental.snapshot.chunk.key-column: id
+```
 
 ```yaml
 source:
   type: sqlserver
   tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
-  scan.incremental.snapshot.chunk.key-column: id
-  scan.incremental.snapshot.chunk.key-columns: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
+  scan.incremental.snapshot.chunk.key-column: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
 ```
+
+A fully qualified `database.schema.table` pattern followed by an unescaped colon is a candidate for the mapping syntax. To preserve existing configurations, if the entire value matches a physical column name in any captured table, it remains a literal source-wide column name. This also applies to column names containing colons or semicolons, such as `inventory.dbo.orders:id`. Excluded tables do not affect this decision. Otherwise, the value is parsed as mappings. Other values, including `tenant:id` and `tenant;id`, remain literal source-wide column names.
+
+In mapping mode, tables without a matching entry use their first primary key column. A trailing semicolon is allowed. The compatibility map and `scan.incremental.snapshot.chunk.key-columns` options always use mapping syntax, so they can also be used to request mappings when a physical column name has the same form.
+
+Mappings reuse the Java Source parser; YAML table patterns also include the database name. Colons inside regex groups or `(?x)` comments are preserved. Escape a literal semicolon in a mapped column name as `\;` inside a single-quoted YAML value.
+
+The previous `scan.incremental.snapshot.chunk.key-columns` option remains supported and can still be combined with a source-wide column. Specify each table pattern only once across all options.
 
 The previous map and flat forms remain supported.
 

@@ -18,9 +18,12 @@
 package org.apache.flink.cdc.connectors.sqlserver.source.utils;
 
 import org.apache.flink.cdc.common.annotation.Internal;
+import org.apache.flink.cdc.common.utils.Predicates;
 import org.apache.flink.table.catalog.ObjectPath;
 
 import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
@@ -40,71 +43,111 @@ public final class SqlServerChunkKeyColumnParser {
         return parse(value, true);
     }
 
+    /** Parses candidate Pipeline mappings; the caller resolves ambiguous physical column names. */
+    public static Map<String, String> parseOption(String value) {
+        return parse(value, true, true);
+    }
+
     private static Map<String, String> parse(String value, boolean regularExpressions) {
+        return parse(value, regularExpressions, false);
+    }
+
+    private static Map<String, String> parse(
+            String value, boolean regularExpressions, boolean allowColumnName) {
         checkNotNull(value, "Table chunk keys must not be null.");
         Map<String, String> columns = new HashMap<>();
         StringBuilder table = new StringBuilder();
         StringBuilder column = new StringBuilder();
         boolean readingColumn = false;
+        boolean mappingStarted = !allowColumnName;
         RegexContext regex = regularExpressions ? new RegexContext() : null;
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            StringBuilder target = readingColumn ? column : table;
-            if (!readingColumn && regex != null && regex.comment) {
-                table.append(current);
-                regex.acceptComment(current);
-                continue;
-            }
-            if (!readingColumn && regex != null && regex.quoted) {
-                table.append(current);
-                if (current == '\\'
-                        && index + 1 < value.length()
-                        && value.charAt(index + 1) == 'E') {
-                    table.append(value.charAt(++index));
-                    regex.quoted = false;
-                } else {
-                    regex.acceptLiteral();
+        try {
+            for (int index = 0; index < value.length(); index++) {
+                char current = value.charAt(index);
+                StringBuilder target = readingColumn ? column : table;
+                if (!readingColumn && regex != null && regex.comment) {
+                    table.append(current);
+                    regex.acceptComment(current);
+                    continue;
                 }
-                continue;
-            }
-            if (current == '\\') {
-                checkArgument(index + 1 < value.length(), "Unterminated chunk key escape.");
-                char escaped = value.charAt(++index);
-                if (!readingColumn || ";:\\".indexOf(escaped) < 0) {
-                    target.append('\\');
-                }
-                target.append(escaped);
-                if (!readingColumn && regex != null) {
-                    if (escaped == 'Q') {
-                        regex.quoted = true;
+                if (!readingColumn && regex != null && regex.quoted) {
+                    table.append(current);
+                    if (current == '\\'
+                            && index + 1 < value.length()
+                            && value.charAt(index + 1) == 'E') {
+                        table.append(value.charAt(++index));
+                        regex.quoted = false;
                     } else {
                         regex.acceptLiteral();
                     }
+                    continue;
                 }
-            } else if (current == ';' && (readingColumn || regex == null || regex.atBoundary())) {
-                addMapping(columns, table, column, readingColumn);
-                table.setLength(0);
-                column.setLength(0);
-                readingColumn = false;
-                if (regex != null) {
-                    regex.reset();
+                if (current == '\\') {
+                    checkArgument(index + 1 < value.length(), "Unterminated chunk key escape.");
+                    char escaped = value.charAt(++index);
+                    if (!readingColumn || ";:\\".indexOf(escaped) < 0) {
+                        target.append('\\');
+                    }
+                    target.append(escaped);
+                    if (!readingColumn && regex != null) {
+                        if (escaped == 'Q') {
+                            regex.quoted = true;
+                        } else {
+                            regex.acceptLiteral();
+                        }
+                    }
+                } else if (current == ';'
+                        && (readingColumn || regex == null || regex.atBoundary())) {
+                    if (!mappingStarted) {
+                        return Collections.emptyMap();
+                    }
+                    addMapping(columns, table, column, readingColumn);
+                    table.setLength(0);
+                    column.setLength(0);
+                    readingColumn = false;
+                    if (regex != null) {
+                        regex.reset();
+                    }
+                } else if (current == ':'
+                        && !readingColumn
+                        && (regex == null || regex.atBoundary())) {
+                    if (!mappingStarted) {
+                        String[] patterns = Predicates.RegExSplitterByComma.split(table.toString());
+                        if (patterns.length == 0
+                                || Arrays.stream(patterns)
+                                        .anyMatch(
+                                                pattern ->
+                                                        Predicates.RegExSplitterByDot.split(pattern)
+                                                                        .length
+                                                                != 3)) {
+                            return Collections.emptyMap();
+                        }
+                        mappingStarted = true;
+                    }
+                    readingColumn = true;
+                } else if (!readingColumn && regex != null) {
+                    int last = regex.accept(value, index);
+                    table.append(value, index, last + 1);
+                    index = last;
+                } else {
+                    target.append(current);
                 }
-            } else if (current == ':' && !readingColumn && (regex == null || regex.atBoundary())) {
-                readingColumn = true;
-            } else if (!readingColumn && regex != null) {
-                int last = regex.accept(value, index);
-                table.append(value, index, last + 1);
-                index = last;
-            } else {
-                target.append(current);
             }
+            if (!mappingStarted) {
+                return Collections.emptyMap();
+            }
+            checkArgument(regex == null || regex.balanced(), "Unbalanced table pattern.");
+            if (readingColumn || !table.toString().trim().isEmpty()) {
+                addMapping(columns, table, column, readingColumn);
+            }
+            checkArgument(!columns.isEmpty(), "Table chunk keys must not be empty.");
+            return columns;
+        } catch (IllegalArgumentException e) {
+            if (mappingStarted) {
+                throw e;
+            }
+            return Collections.emptyMap();
         }
-        checkArgument(regex == null || regex.balanced(), "Unbalanced table pattern.");
-        if (readingColumn || !table.toString().trim().isEmpty()) {
-            addMapping(columns, table, column, readingColumn);
-        }
-        checkArgument(!columns.isEmpty(), "Table chunk keys must not be empty.");
-        return columns;
     }
 
     /** Parses mappings with literal schema and table names for the Java Source. */

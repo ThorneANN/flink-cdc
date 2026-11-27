@@ -80,18 +80,23 @@ public class SqlServerDataSourceOptions {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The chunk key of table snapshot, captured tables are split into multiple chunks by a chunk key when read the snapshot of table."
-                                    + "By default, the chunk key is the first column of the primary key."
-                                    + "A non-primary key column can also be used."
-                                    + "For tables without primary keys, an explicit non-null column is required.");
+                            "A source-wide chunk key column, or database.schema.table:column entries "
+                                    + "separated by semicolons for table-specific chunk keys. "
+                                    + "An existing physical column name in a captured table takes "
+                                    + "precedence over the mapping syntax. "
+                                    + "Table patterns follow the tables option syntax. Unmapped tables "
+                                    + "default to the first primary key column. Non-primary key columns "
+                                    + "are also supported. Tables without primary keys require an "
+                                    + "explicit non-null chunk key column.");
 
     public static final ConfigOption<String> CHUNK_KEY_COLUMNS =
             ConfigOptions.key("scan.incremental.snapshot.chunk.key-columns")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Table-specific chunk keys as database.schema.table:column entries "
-                                    + "separated by semicolons. Table patterns follow the tables option syntax.");
+                            "Compatibility option for table-specific database.schema.table:column "
+                                    + "entries separated by semicolons. Prefer "
+                                    + "scan.incremental.snapshot.chunk.key-column for new configurations.");
 
     public static final ConfigOption<String> CHUNK_KEY_COLUMN_BY_TABLE =
             ConfigOptions.key("scan.incremental.snapshot.chunk.key-column-by-table")

@@ -165,14 +165,14 @@ pipeline:
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>表快照的统一切分键列名。默认使用各表自身主键的第一列，也可以指定非主键列。无主键表必须显式配置一个非空列作为切分键。</td>
+      <td>统一切分键列名，或以分号分隔的 database.schema.table:column 映射。未匹配映射的表默认使用自身主键的第一列，也可以指定非主键列。无主键表必须显式配置一个非空列作为切分键。</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.key-columns</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
-      <td>使用分号分隔 database.schema.table:column，由 Java Source 的共享解析器处理，匹配结果优先于统一列名。</td>
+      <td>兼容选项，支持以分号分隔的 database.schema.table:column 条目。新配置建议使用 scan.incremental.snapshot.chunk.key-column。匹配的配置覆盖统一列名。</td>
     </tr>
     <tr>
       <td>scan.incremental.snapshot.chunk.key-column-by-table</td>
@@ -287,17 +287,27 @@ pipeline:
 
 ## 切分键配置
 
-使用 `scan.incremental.snapshot.chunk.key-column` 指定统一列名。配置值整体作为一个列名读取，保留其中的冒号和分号。
+使用 `scan.incremental.snapshot.chunk.key-column`，既可以配置统一列名，也可以配置多张表的切分列：
 
-使用 `scan.incremental.snapshot.chunk.key-columns`，采用与 Java Source 相同的字符串格式；YAML 表模式包含数据库名。两者复用 Java 解析器，保留正则分组和列名中的冒号。列名中的分号在 YAML 单引号字符串中写为 `\;`。
+```yaml
+# 所有表使用相同的切分列。
+scan.incremental.snapshot.chunk.key-column: id
+```
 
 ```yaml
 source:
   type: sqlserver
   tables: inventory.dbo.orders,inventory.dbo.users,inventory.dbo.archived_orders
-  scan.incremental.snapshot.chunk.key-column: id
-  scan.incremental.snapshot.chunk.key-columns: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
+  scan.incremental.snapshot.chunk.key-column: 'inventory.dbo.(?:orders|archived_orders):tenant:id;inventory.dbo.users:tenant\;id]'
 ```
+
+完整的 `数据库.schema.表模式` 后跟未转义的冒号时，视为候选映射。为了兼容旧配置，如果整个配置值与任一已采集表的真实列名匹配，仍按原始统一列名处理，包括含冒号、分号的列名，例如 `inventory.dbo.orders:id`。已排除的表不影响此判断。不存在同名列时才按映射解析。其他值继续作为原始统一列名，包括 `tenant:id` 和 `tenant;id`。
+
+映射模式下，没有匹配条目的表默认使用自身主键的第一列。允许末尾保留分号。兼容 Map 和 `scan.incremental.snapshot.chunk.key-columns` 选项始终使用映射格式，因此也可在存在同形真实列名时显式指定映射。
+
+映射复用 Java Source 的解析器，YAML 表模式还需包含数据库名。正则分组和 `(?x)` 注释中的冒号会保留。映射列名中的分号在 YAML 单引号字符串中写为 `\;`。
+
+之前的 `scan.incremental.snapshot.chunk.key-columns` 参数继续兼容，仍可与统一列名组合使用。同一个表模式只能在所有选项中配置一次。
 
 原有 Map 和平铺键写法继续兼容。
 

@@ -32,6 +32,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Tests the shared SQL Server table chunk-key syntax. */
 class SqlServerChunkKeyColumnParserTest {
 
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "id",
+                "tenant:id;part]",
+                "tenant;id",
+                "inventory.dbo.orders",
+                "tenant)id",
+                "tenant[id",
+                "id\\",
+                "(?x)id#comment:ignored"
+            })
+    void keepsSourceWideColumnsLiteral(String value) {
+        assertThat(SqlServerChunkKeyColumnParser.parseOption(value)).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "inventory.dbo.orders:id",
+                "inventory.dbo.(?:orders|users):tenant:id\\;part]",
+                "inventory.dbo.(?x)orders # comment:;ignored\n:id",
+                "inventory.dbo.orders:id;inventory.dbo.users:user_id;"
+            })
+    void reusesMappingParserForUnifiedOption(String value) {
+        assertThat(SqlServerChunkKeyColumnParser.parseOption(value))
+                .containsExactlyInAnyOrderEntriesOf(SqlServerChunkKeyColumnParser.parse(value));
+    }
+
     @Test
     void parsesMultipleTablesAndTrailingSeparator() {
         assertThat(

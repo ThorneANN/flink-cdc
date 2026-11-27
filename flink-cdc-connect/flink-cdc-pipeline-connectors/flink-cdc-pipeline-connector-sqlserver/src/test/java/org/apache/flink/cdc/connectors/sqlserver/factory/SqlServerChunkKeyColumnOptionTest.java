@@ -35,6 +35,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,14 +59,214 @@ class SqlServerChunkKeyColumnOptionTest {
                     TableId.tableId("inventory", "dbo", "products"));
 
     @ParameterizedTest
-    @ValueSource(strings = {"id", "tenant:id", "tenant;id", "inventory.dbo.orders:id"})
+    @ValueSource(
+            strings = {
+                "id",
+                "tenant:id",
+                "tenant;id",
+                "tenant:id;part]",
+                "inventory.dbo.orders",
+                "inventory.dbo.orders:id",
+                "inventory.dbo.orders:tenant;id",
+                "inventory.dbo.orders:id;inventory.dbo.users:user_id",
+                "tenant)id"
+            })
     void preservesLegacyColumnName(String columnName) throws Exception {
         SqlServerSourceConfig sourceConfig =
-                configureYaml(CHUNK_KEY_COLUMN + ": '" + columnName + "'");
+                configureYaml(
+                        CHUNK_KEY_COLUMN + ": '" + columnName + "'",
+                        (tables, column) -> columnName.equals(column));
 
         assertThat(sourceConfig.getChunkKeyColumn()).isEqualTo(columnName);
         assertThat(chunkKey(sourceConfig, "dbo", "orders")).isEqualTo(columnName);
         assertThat(chunkKey(sourceConfig, "audit", "orders")).isEqualTo(columnName);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "tenant:id", "tenant;id", "tenant:id;part]"})
+    void doesNotReadColumnMetadataForUnambiguousColumnNames(String columnName) {
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(CHUNK_KEY_COLUMN, columnName),
+                        (tables, column) -> {
+                            throw new AssertionError("Unexpected column metadata lookup");
+                        });
+
+        assertThat(config.getChunkKeyColumn()).isEqualTo(columnName);
+    }
+
+    @Test
+    void prefersExistingLiteralColumnAndKeepsPreviousTableOverrides() {
+        String literalColumn = "inventory.dbo.orders:id";
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(
+                                CHUNK_KEY_COLUMN,
+                                literalColumn,
+                                CHUNK_KEY_COLUMNS,
+                                "inventory.dbo.users:user_id"),
+                        (tables, column) -> literalColumn.equals(column));
+
+        assertThat(config.getChunkKeyColumn()).isEqualTo(literalColumn);
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo(literalColumn);
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("user_id");
+        assertThat(chunkKey(config, "audit", "orders")).isEqualTo(literalColumn);
+    }
+
+    @Test
+    void checksAmbiguousColumnOnceAndOnlyInCapturedTables() {
+        AtomicInteger lookups = new AtomicInteger();
+        String literalColumn = "inventory.dbo.orders:id";
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(
+                                CHUNK_KEY_COLUMN,
+                                literalColumn,
+                                "tables.exclude",
+                                "inventory.dbo.users"),
+                        (tables, column) -> {
+                            lookups.incrementAndGet();
+                            assertThat(column).isEqualTo(literalColumn);
+                            assertThat(tables)
+                                    .containsExactlyInAnyOrder(
+                                            TABLES.get(0), TABLES.get(2), TABLES.get(3));
+                            return tables.contains(TABLES.get(1));
+                        });
+
+        assertThat(lookups).hasValue(1);
+        assertThat(config.getChunkKeyColumn()).isNull();
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("id");
+        assertThat(chunkKey(config, "dbo", "users")).isNull();
+    }
+
+    @Test
+    void parsesMultipleTablesFromUnifiedOption() throws Exception {
+        SqlServerSourceConfig config =
+                configureYaml(
+                        CHUNK_KEY_COLUMN
+                                + ": 'inventory.dbo.orders:order_id;inventory.dbo.users:user_id;'\n");
+
+        assertThat(config.getChunkKeyColumn()).isNull();
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("order_id");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("user_id");
+        assertThat(chunkKey(config, "dbo", "products")).isNull();
+        assertThat(chunkKey(config, "audit", "orders")).isNull();
+    }
+
+    @Test
+    void parsesOneTableFromUnifiedOption() {
+        SqlServerSourceConfig config =
+                configure(Map.of(CHUNK_KEY_COLUMN, "inventory.dbo.orders:order_id"));
+
+        assertThat(config.getChunkKeyColumn()).isNull();
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("order_id");
+        assertThat(chunkKey(config, "dbo", "users")).isNull();
+    }
+
+    @Test
+    void leavesDefaultChunkKeysWhenUnifiedPatternsDoNotMatch() {
+        SqlServerSourceConfig config =
+                configure(Map.of(CHUNK_KEY_COLUMN, "inventory.dbo.uncaptured:id"));
+
+        assertThat(config.getChunkKeyColumn()).isNull();
+        assertThat(chunkKey(config, "dbo", "orders")).isNull();
+        assertThat(chunkKey(config, "dbo", "users")).isNull();
+    }
+
+    @Test
+    void preservesRegexAndColumnSeparatorsInUnifiedOption() throws Exception {
+        SqlServerSourceConfig config =
+                configureYaml(
+                        CHUNK_KEY_COLUMN
+                                + ": 'inventory.dbo.(?:orders|users):tenant:id\\;part];inventory.audit.orders:audit_id'\n");
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(config, "audit", "orders")).isEqualTo("audit_id");
+        assertThat(chunkKey(config, "dbo", "products")).isNull();
+    }
+
+    @Test
+    void preservesRegexCommentsInUnifiedOption() throws Exception {
+        SqlServerSourceConfig config =
+                configureYaml(
+                        CHUNK_KEY_COLUMN
+                                + ": \"inventory.dbo.(?x)orders # note:ignored\\n:id;inventory.dbo.users:tenant:id\\\\;part]\"\n");
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("id");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("tenant:id;part]");
+        assertThat(chunkKey(config, "dbo", "products")).isNull();
+    }
+
+    @Test
+    void combinesUnifiedAndPreviousTableOptions() {
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(
+                                CHUNK_KEY_COLUMN, "inventory.dbo.orders:order_id",
+                                CHUNK_KEY_COLUMNS, "inventory.dbo.users:user_id",
+                                CHUNK_KEY_MAP, "inventory.audit.orders: audit_id"));
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("order_id");
+        assertThat(chunkKey(config, "dbo", "users")).isEqualTo("user_id");
+        assertThat(chunkKey(config, "audit", "orders")).isEqualTo("audit_id");
+        assertThat(chunkKey(config, "dbo", "products")).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"string", "map", "flat"})
+    void rejectsDuplicatePatternsAcrossUnifiedAndPreviousOptions(String form) {
+        String option =
+                "string".equals(form)
+                        ? CHUNK_KEY_COLUMNS
+                        : "map".equals(form)
+                                ? CHUNK_KEY_MAP
+                                : CHUNK_KEY_BY_TABLE + "inventory.dbo.orders";
+        String value =
+                "string".equals(form)
+                        ? "inventory.dbo.orders:id"
+                        : "map".equals(form) ? "inventory.dbo.orders: id" : "id";
+
+        assertThatThrownBy(
+                        () ->
+                                configure(
+                                        Map.of(
+                                                CHUNK_KEY_COLUMN,
+                                                "inventory.dbo.orders:id",
+                                                option,
+                                                value)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Duplicate chunk key configuration");
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "inventory.dbo.orders:",
+                "inventory.dbo.orders:id;inventory.dbo.users",
+                "inventory.dbo.orders:id;" + ";inventory.dbo.users:id",
+                "inventory.dbo.orders:id;inventory.dbo.orders:other"
+            })
+    void rejectsMalformedUnifiedMappings(String value) {
+        assertThatThrownBy(() -> configure(Map.of(CHUNK_KEY_COLUMN, value)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CHUNK_KEY_COLUMN);
+    }
+
+    @Test
+    void onlyConfiguresCapturedTablesFromUnifiedOption() {
+        SqlServerSourceConfig config =
+                configure(
+                        Map.of(
+                                "tables.exclude",
+                                "inventory.dbo.users",
+                                CHUNK_KEY_COLUMN,
+                                "inventory.dbo.(?:orders|users|uncaptured):id"));
+
+        assertThat(chunkKey(config, "dbo", "orders")).isEqualTo("id");
+        assertThat(chunkKey(config, "dbo", "users")).isNull();
+        assertThat(chunkKey(config, "dbo", "uncaptured")).isNull();
+        assertThat(chunkKey(config, "dbo", "products")).isNull();
     }
 
     @Test
@@ -147,13 +349,14 @@ class SqlServerChunkKeyColumnOptionTest {
                 .hasMessageContaining(CHUNK_KEY_COLUMNS);
     }
 
-    @Test
-    void rejectsConflictingStringPatterns() {
+    @ParameterizedTest
+    @ValueSource(strings = {CHUNK_KEY_COLUMN, CHUNK_KEY_COLUMNS})
+    void rejectsConflictingStringPatterns(String option) {
         assertThatThrownBy(
                         () ->
                                 configure(
                                         Map.of(
-                                                CHUNK_KEY_COLUMNS,
+                                                option,
                                                 "inventory.dbo.(?:orders|users):id;inventory.dbo.orders:order_id")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Conflicting chunk key columns");
@@ -408,7 +611,19 @@ class SqlServerChunkKeyColumnOptionTest {
         return configure(YAML_MAPPER.readValue(yaml, new TypeReference<Map<String, String>>() {}));
     }
 
+    private static SqlServerSourceConfig configureYaml(
+            String yaml, BiPredicate<List<TableId>, String> columnExists) throws Exception {
+        return configure(
+                YAML_MAPPER.readValue(yaml, new TypeReference<Map<String, String>>() {}),
+                columnExists);
+    }
+
     private static SqlServerSourceConfig configure(Map<String, String> overrides) {
+        return configure(overrides, (tables, column) -> false);
+    }
+
+    private static SqlServerSourceConfig configure(
+            Map<String, String> overrides, BiPredicate<List<TableId>, String> columnExists) {
         Map<String, String> options = new HashMap<>();
         options.put("hostname", "localhost");
         options.put("username", "user");
@@ -421,6 +636,14 @@ class SqlServerChunkKeyColumnOptionTest {
                     @Override
                     List<TableId> discoverTables(SqlServerSourceConfig sourceConfig) {
                         return TABLES;
+                    }
+
+                    @Override
+                    boolean hasColumn(
+                            SqlServerSourceConfig sourceConfig,
+                            List<TableId> tables,
+                            String columnName) {
+                        return columnExists.test(tables, columnName);
                     }
                 };
         Factory.Context context =

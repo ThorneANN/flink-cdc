@@ -125,6 +125,15 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
         String username = config.get(USERNAME);
         String password = config.get(PASSWORD);
         String chunkKeyColumn = config.get(SCAN_INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMN);
+        Map<String, String> chunkKeyColumns = new HashMap<>();
+        IllegalArgumentException chunkKeyParseError = null;
+        if (chunkKeyColumn != null) {
+            try {
+                chunkKeyColumns.putAll(SqlServerChunkKeyColumnParser.parseOption(chunkKeyColumn));
+            } catch (IllegalArgumentException e) {
+                chunkKeyParseError = e;
+            }
+        }
         String tables = config.get(TABLES);
         ZoneId serverTimeZone = getServerTimeZone(config);
         String tablesExclude = config.get(TABLES_EXCLUDE);
@@ -209,8 +218,32 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
                                 + tablesExclude);
             }
         }
+        Set<String> capturedTableNames = new HashSet<>(capturedTables);
+        if (!chunkKeyColumns.isEmpty() || chunkKeyParseError != null) {
+            List<TableId> capturedTableIds =
+                    tableIds.stream()
+                            .filter(
+                                    tableId ->
+                                            capturedTableNames.contains(toSchemaTableName(tableId)))
+                            .collect(Collectors.toList());
+            if (hasColumn(sourceConfig, capturedTableIds, chunkKeyColumn)) {
+                chunkKeyColumns.clear();
+            } else if (chunkKeyParseError != null) {
+                throw new IllegalArgumentException(
+                        "Invalid source option '"
+                                + SCAN_INCREMENTAL_SNAPSHOT_CHUNK_KEY_COLUMN.key()
+                                + "'.",
+                        chunkKeyParseError);
+            } else {
+                configFactory.chunkKeyColumn(null);
+            }
+        }
         configFactory.tableList(capturedTables.toArray(new String[0]));
-        configureTableChunkKeys(configFactory, configMap, tableIds, new HashSet<>(capturedTables));
+        configureTableChunkKeys(
+                configFactory,
+                tableChunkKeyColumns(configMap, chunkKeyColumns),
+                tableIds,
+                capturedTableNames);
 
         String metadataList = config.get(METADATA_LIST);
         List<SqlServerReadableMetadata> readableMetadataList = listReadableMetadata(metadataList);
@@ -223,13 +256,18 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
         return SqlServerSchemaUtils.listTables(sourceConfig, null, null);
     }
 
+    boolean hasColumn(
+            SqlServerSourceConfig sourceConfig, List<TableId> tableIds, String columnName) {
+        return SqlServerSchemaUtils.hasColumn(sourceConfig, tableIds, columnName);
+    }
+
     private static void configureTableChunkKeys(
             SqlServerSourceConfigFactory configFactory,
-            Map<String, String> options,
+            Map<String, String> columns,
             List<TableId> tableIds,
             Set<String> capturedTables) {
         Map<ObjectPath, String> chunkKeys = new HashMap<>();
-        for (Map.Entry<String, String> option : tableChunkKeyColumns(options).entrySet()) {
+        for (Map.Entry<String, String> option : columns.entrySet()) {
             String patterns = option.getKey();
             String key = CHUNK_KEY_COLUMN_BY_TABLE_PREFIX + patterns;
             String column = option.getValue();
@@ -266,15 +304,28 @@ public class SqlServerDataSourceFactory implements DataSourceFactory {
         configFactory.chunkKeyColumns(chunkKeys);
     }
 
-    private static Map<String, String> tableChunkKeyColumns(Map<String, String> options) {
-        Map<String, String> columns = new HashMap<>();
+    private static Map<String, String> tableChunkKeyColumns(
+            Map<String, String> options, Map<String, String> columns) {
         String configuredColumns = options.get(CHUNK_KEY_COLUMNS.key());
         if (configuredColumns != null) {
             try {
-                columns.putAll(SqlServerChunkKeyColumnParser.parse(configuredColumns));
+                SqlServerChunkKeyColumnParser.parse(configuredColumns)
+                        .forEach(
+                                (pattern, column) -> {
+                                    if (columns.putIfAbsent(pattern, column) != null) {
+                                        throw new IllegalArgumentException(
+                                                "Duplicate chunk key configuration for table pattern '"
+                                                        + pattern
+                                                        + "'.");
+                                    }
+                                });
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException(
-                        "Invalid source option '" + CHUNK_KEY_COLUMNS.key() + "'.", e);
+                        "Invalid source option '"
+                                + CHUNK_KEY_COLUMNS.key()
+                                + "': "
+                                + e.getMessage(),
+                        e);
             }
         }
         String configuredMap = options.get(CHUNK_KEY_COLUMN_BY_TABLE.key());
